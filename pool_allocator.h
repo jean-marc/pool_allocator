@@ -935,7 +935,8 @@ namespace pool_allocator{
 	){
 		//not inside assert because compiler complaints
 		auto pp=get_pool<typename pool::ptr<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>::CELL>();
-		assert(pp==p.pool_ptr);
+		//assert(pp==p.pool_ptr);//what if null pointer?
+		assert(pp==p.pool_ptr||p.index==0);
 		index=p.index;
 	}
 	//implementation of ptr(const ptr_d&)
@@ -946,7 +947,8 @@ namespace pool_allocator{
 	){
 		//not inside assert because compiler complaints
 		auto pp=get_pool<typename pool::ptr<INDEX,const PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>::CELL>();
-		assert(pp==p.pool_ptr);
+		//assert(pp==p.pool_ptr);//what if null pointer?
+		assert(pp==p.pool_ptr||p.index==0);
 		index=p.index;
 	}
 
