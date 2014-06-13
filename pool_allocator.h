@@ -68,6 +68,10 @@ namespace pool_allocator{
 		static void post_deallocate(cell* begin,cell* end){
 			for(cell* i=begin;i<end;++i) i->management=0x0;	
 		}
+		static void is_available(cell* begin,cell* end){
+			for(cell* i=begin;i<end;++i) 
+				if(i->management) throw std::out_of_range("already allocated");	
+		}
 		//check if the cell has been allocated
 		static void check(cell& c){
 			if(!c.management) throw std::out_of_range("bad reference");	
@@ -101,6 +105,7 @@ namespace pool_allocator{
 		enum{MAX_SIZE=(1L<<(sizeof(INDEX)<<3))/FACTOR-1};
 		static void post_allocate(cell*,cell*){}
 		static void post_deallocate(cell*,cell*){}
+		static void is_available(cell* begin,cell* end){}
 		static void check(cell& c){}
 	};
 	struct pool{
@@ -759,8 +764,8 @@ namespace pool_allocator{
 		template<typename CELL> typename CELL::INDEX allocate_at(typename CELL::INDEX i,size_t n){
 			CELL *c=(CELL*)buffer;
 			typedef typename CELL::INDEX INDEX;
-			//should check if cells available
-			//CELL::check(c[i]);//bounds checking
+			//check if cells available
+			CELL::is_available(c+i,c+i+n);
 			c[0].body.info.size+=n;//update total number of cells in use
 			CELL::post_allocate(c+i,c+i+n);
 			return i;
