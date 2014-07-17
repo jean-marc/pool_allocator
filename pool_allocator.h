@@ -57,7 +57,7 @@ namespace pool_allocator{
 			//char payload[sizeof(PAYLOAD)];//will affect data alignment, we have to investigate the effect of misalignment (extra CPU + exception for special operations)
 			PAYLOAD payload;
 		}body;
-		typedef cell<INDEX,PAYLOAD,ALLOCATOR,_RAW_ALLOCATOR_,MANAGEMENT,_info<void>> HELPER;	
+		typedef cell<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT,_info<void>> HELPER;	
 		enum{MANAGED=true};
 		enum{OPTIMIZATION=false};
 		enum{FACTOR=1};
@@ -96,7 +96,7 @@ namespace pool_allocator{
 			//char payload[sizeof(PAYLOAD)];//problem with data alignment, the members of PAYLOAD are no longer accessible
 			PAYLOAD payload;
 		}body;
-		typedef cell<INDEX,PAYLOAD,ALLOCATOR,_RAW_ALLOCATOR_,void,_info<void>> HELPER;	
+		typedef cell<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,void,_info<void>> HELPER;	
 		enum{MANAGED=false};
 		//OPTIMIZATION can cause confusion, would be good to be able to turn it off
 		enum{OPTIMIZATION=(sizeof(INFO)>sizeof(PAYLOAD))&&(sizeof(INFO)%sizeof(PAYLOAD)==0)};
@@ -614,7 +614,7 @@ namespace pool_allocator{
 		//typedef allocator<POOL_CELL> POOL_ALLOCATOR;
 		typedef allocator<uint8_t,pool,std::allocator<pool>,mmap_allocator<pool>,char> POOL_ALLOCATOR;
 		char* buffer;
-		size_t buffer_size;//in byte
+		size_t buffer_size;//in byte, this causes problem when pool's buffer is not persisted 
 		const size_t cell_size;//in byte
 		const size_t payload_offset;
 		const size_t type_id;//
@@ -674,6 +674,7 @@ namespace pool_allocator{
 				*/ 
 				std::hash<std::string> str_hash;
 				size_t type_id=str_hash(typeid(typename CELL::PAYLOAD).name());
+				size_t buffer_size=64*sizeof(CELL);
 				typename CELL::ALLOCATOR a;
 				cerr<<"looking for pool `"<<typeid(typename CELL::PAYLOAD).name()<<"'"<<endl;
 				auto i=std::find_if(a.cbegin(),a.cend(),test(type_id));
@@ -681,7 +682,6 @@ namespace pool_allocator{
 					cerr<<"pool not found"<<endl;
 					typename CELL::RAW_ALLOCATOR raw;//what is the payload?
 					//cerr<<"RAW_ALLOCATOR:"<<typeid(typename CELL::RAW_ALLOCATOR::value_type).name()<<endl;
-					size_t buffer_size=64*sizeof(CELL);
 					//we could simplify a lot by giving filename to allocator
 					auto buffer=raw.allocate(buffer_size);
 					if(std::is_same<typename CELL::RAW_ALLOCATOR,std::allocator<char>>::value){
@@ -690,6 +690,7 @@ namespace pool_allocator{
 					}
 					CELL *c=(CELL*)buffer;
 					if(c[0].body.info.size==0&&c[0].body.info.next==0){
+						cerr<<"resetting the buffer"<<endl;
 						c[0].body.info.size=0;//new pool
 						c[0].body.info.next=1;
 						c[1].body.info.size=buffer_size/sizeof(CELL)-1;
@@ -706,12 +707,14 @@ namespace pool_allocator{
 				}else{
 					cerr<<"pool found at index "<<(size_t)i.index<<endl;
 					typename CELL::RAW_ALLOCATOR raw;
-					size_t buffer_size=64*sizeof(CELL);
 					auto buffer=raw.allocate(buffer_size);
-					if(std::is_same<typename CELL::RAW_ALLOCATOR,std::allocator<char>>::value) memset(buffer,0,buffer_size);
+					if(std::is_same<typename CELL::RAW_ALLOCATOR,std::allocator<char>>::value){
+						cerr<<"resetting volatile memory"<<endl;
+						memset(buffer,0,buffer_size);
+					}
 					CELL *c=(CELL*)buffer;
 					if(c[0].body.info.size==0&&c[0].body.info.next==0){
-						cerr<<"new pool"<<endl;
+						cerr<<"resetting the buffer"<<endl;
 						c[0].body.info.size=0;//new pool
 						c[0].body.info.next=1;
 						c[1].body.info.size=buffer_size/sizeof(CELL)-1;
@@ -727,6 +730,9 @@ namespace pool_allocator{
 						//we only have to refresh the buffer and function pointers
 						p->buffer=buffer;
 						p->get_size_generic=pool::get_size<CELL>;
+						// we also have to reset buffer_size if not persisted
+						if(std::is_same<typename CELL::RAW_ALLOCATOR,std::allocator<char>>::value)
+							p->buffer_size=buffer_size;
 						return p;
 					}else{
 						throw runtime_error("persisted class has been modified");
