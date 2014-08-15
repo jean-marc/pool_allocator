@@ -324,6 +324,7 @@ namespace pool_allocator{
 			typename RAW_ALLOCATOR,//not needed
 			typename MANAGEMENT
 		>class cell_iterator{
+			friend struct pool;
 			INDEX index;
 			INDEX cell_index;
 		public:
@@ -333,7 +334,7 @@ namespace pool_allocator{
 			typedef PAYLOAD& reference;
 			typedef ptrdiff_t difference_type;
 			typedef forward_iterator_tag iterator_category;
-			cell_iterator(INDEX index=0):index(_index),cell_index(1){}
+			cell_iterator(INDEX index=0):index(index),cell_index(1){}
 			cell_iterator& operator++(){
 				++index;
 				++cell_index;//otherwise always stays on same cell
