@@ -39,7 +39,7 @@ namespace pool_allocator{
 		typename _PAYLOAD_, 	/* the actual payload */
 		typename _ALLOCATOR_,	/* where the pool instance will be allocated, distinct from where the buffer is allocated */
 		typename _RAW_ALLOCATOR_=std::allocator<char>,	/* where the buffer is allocated */
-		typename _MANAGEMENT_=void,	/* overhead to tag allocated cells and do reference counting */
+		typename _MANAGEMENT_=void,	/* overhead to tag allocated cells (bool) and do reference counting (uint_8)*/
 		typename _INFO_=_info<_INDEX_>
 	> struct cell{
 		typedef _INDEX_ INDEX;
@@ -63,7 +63,7 @@ namespace pool_allocator{
 		enum{FACTOR=1};
 		enum{MAX_SIZE=(1L<<(sizeof(INDEX)<<3))-1};//-1 because cell[0] is used for management
 		static void post_allocate(cell* begin,cell* end){
-			for(cell* i=begin;i<end;++i) i->management=0xf;	
+			for(cell* i=begin;i<end;++i) i->management=0x1;//will increase for reference counting	
 		}
 		static void post_deallocate(cell* begin,cell* end){
 			for(cell* i=begin;i<end;++i) i->management=0x0;	
@@ -76,6 +76,11 @@ namespace pool_allocator{
 		static void check(cell& c){
 			if(!c.management) throw std::out_of_range("bad reference");	
 		}
+		#ifdef REF_COUNT
+		static void increase_ref_count(cell& c){++c.management;}
+		static void decrease_ref_count(cell& c){--c.management;}
+		static int get_ref_count(cell& c){return c.management;}
+		#endif
 	};
 	template<
 		typename _INDEX_,
@@ -107,6 +112,11 @@ namespace pool_allocator{
 		static void post_deallocate(cell*,cell*){}
 		static void is_available(cell* begin,cell* end){}
 		static void check(cell& c){}
+		#ifdef REF_COUNT
+		static void increase_ref_count(cell& c){}
+		static void decrease_ref_count(cell& c){}
+		static int get_ref_count(cell& c){return 0;}
+		#endif
 	};
 	struct pool{
 		//forward declaration of ptr_d for constructor
@@ -134,6 +144,58 @@ namespace pool_allocator{
 			typedef ptrdiff_t difference_type;
 			typedef random_access_iterator_tag iterator_category;
 			/*explicit*/ ptr(INDEX index=0):index(index){}
+			#ifdef REF_COUNT
+			ptr(const ptr& p):index(p.index){
+				if(is_same<MANAGEMENT,uint8_t>::value){	
+					cerr<<"copy constructor"<<endl;	
+					//cerr<<"management:"<<(int)pool::get_pool<CELL>()->get_cell_cast<CELL>(index).management<<endl;
+					cerr<<"management:"<<CELL::get_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index))<<endl;
+					CELL::increase_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index)); 
+				}
+			}
+			ptr& operator=(const ptr& p){
+				if(is_same<MANAGEMENT,uint8_t>::value){	
+					cerr<<"copy operator"<<endl;	
+					if(index){
+						//if(pool::get_pool<CELL>()->get_cell_cast<CELL>(index).management==1){
+						if(CELL::get_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index))==1){
+							(*this)->~VALUE_TYPE();
+							allocator<INDEX,VALUE_TYPE,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> a;
+							pool::get_pool<CELL>()->template deallocate<CELL>(index/CELL::FACTOR,max<size_t>(1/CELL::FACTOR,1));
+							//a.deallocate(*this,1);//makes a copy
+						}else{
+							//--pool::get_pool<CELL>()->get_cell_cast<CELL>(index).management;
+							CELL::decrease_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index)); 
+						}
+					}
+					index=p.index;
+					//++pool::get_pool<CELL>()->get_cell_cast<CELL>(index).management; 
+					CELL::increase_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index)); 
+				}else{
+					index=p.index;
+				}
+				return *this;
+			}
+			~ptr(){
+				if(is_same<MANAGEMENT,uint8_t>::value){	
+					cerr<<"~ptr"<<endl;
+					//cerr<<"management:"<<(int)pool::get_pool<CELL>()->get_cell_cast<CELL>(index).management<<endl;
+					cerr<<"management:"<<CELL::get_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index))<<endl;
+					if(index){
+						//if(pool::get_pool<CELL>()->get_cell_cast<CELL>(index).management==1){
+						if(CELL::get_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index))==1){
+							(*this)->~VALUE_TYPE();
+							allocator<INDEX,VALUE_TYPE,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> a;
+							pool::get_pool<CELL>()->template deallocate<CELL>(index/CELL::FACTOR,max<size_t>(1/CELL::FACTOR,1));
+							//a.deallocate(*this,1);//makes a copy
+						}else{
+							//--pool::get_pool<CELL>()->get_cell_cast<CELL>(index).management;
+							CELL::decrease_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index)); 
+						}
+					}
+				}
+			}
+			#endif
 			//no casting between different types	
 			template<
 				typename _OTHER_INDEX_,
@@ -227,6 +289,7 @@ namespace pool_allocator{
 			> ptr(const ptr_d<_OTHER_INDEX_,_OTHER_PAYLOAD_,_OTHER_ALLOCATOR_,_OTHER_RAW_ALLOCATOR_,_OTHER_MANAGEMENT_>& p);
 			value_type* operator->()const{
 				typedef typename IfThenElse<CELL::OPTIMIZATION,typename CELL::HELPER,CELL>::ResultT PAYLOAD_CELL;
+				//should use different call because it return a pointer to const
 				return &pool::get_pool<CELL>()->template get_payload<PAYLOAD_CELL>(index);
 			}
 			reference operator*()const{
@@ -260,40 +323,38 @@ namespace pool_allocator{
 			typename ALLOCATOR,//not needed
 			typename RAW_ALLOCATOR,//not needed
 			typename MANAGEMENT
-		>struct cell_iterator{
+		>class cell_iterator{
+			INDEX index;
+			INDEX cell_index;
+		public:
 			typedef cell<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
 			typedef cell_iterator pointer;
 			typedef PAYLOAD value_type;
 			typedef PAYLOAD& reference;
 			typedef ptrdiff_t difference_type;
 			typedef forward_iterator_tag iterator_category;
-			INDEX index;
-			INDEX n;//number of cells to visit
-			cell_iterator(INDEX index=0,INDEX n=pool::get_pool<CELL>()->template get_cells<CELL>()[0].body.info.size):index(index),n(n){
-				//while(!(*this)->management&&n) ++index;
-				while(!pool::get_pool<CELL>()->template get_cells<CELL>()[index].management&&n){
-					//cerr<<operator->()->management<<"\t"<<pool::get_pool<CELL>()->get_cells<CELL>()[index].management<<"\t"<<index<<"\t"<<n<<endl;
-					 ++index;
-				}
-			}
+			cell_iterator(INDEX index=0):index(_index),cell_index(1){}
 			cell_iterator& operator++(){
 				++index;
-				//while(!(*this)->management&&n) ++index;
-				while(!pool::get_pool<CELL>()->template get_cells<CELL>()[index].management&&n){
-					//cerr<<pool::get_pool<CELL>()->get_cells<CELL>()[index].management<<"\t"<<index<<"\t"<<n<<endl;
-					 ++index;
-				}
-				--n;
+				++cell_index;//otherwise always stays on same cell
 				return *this;
 			}
-			//value_type* operator->()const{return &pool::get_pool<CELL>()->template get_cells<CELL>()[index];}
-			//reference operator*()const{return pool::get_pool<CELL>()->template get_cells<CELL>()[index];}
-			value_type* operator->()const{return &pool::get_pool<CELL>()->template get_cells<CELL>()[index].body.payload;}
-			reference operator*()const{return pool::get_pool<CELL>()->template get_cells<CELL>()[index].body.payload;}
-			//promote to ptr
-			operator ptr<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>(){return ptr<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>(index);}
-			bool operator==(const cell_iterator& a)const{return n==a.n;}
-			bool operator!=(const cell_iterator& a)const{return n!=a.n;}
+			value_type* operator->(){//not const
+				while(!pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].management) ++cell_index;
+				return &pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].body.payload;
+			}	
+			reference operator*(){
+				while(!pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].management) ++cell_index;
+				return pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].body.payload;
+			}
+			bool operator==(const cell_iterator& a)const{return index==a.index;}
+			bool operator<(const cell_iterator& a)const{return index<a.index;}
+			bool operator!=(const cell_iterator& a)const{return index!=a.index;}
+			INDEX get_cell_index(){
+				while(!pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].management) ++cell_index;
+				return cell_index;
+			}
+			operator ptr<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>(){return ptr<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>(get_cell_index());}
 		};
 		/*
 		*	allocate memory on file
@@ -396,9 +457,10 @@ namespace pool_allocator{
 			typedef char* pointer;
 			//typedef T value_type;
 			static mmap_allocator_impl* get_impl(){
-				/* could also use the hash of the typeid in case names are too long or not valid file names 
-				 * symbolic links could be used to provide meaningful names
-				 */
+				/* 
+ 				* use the hash of the typeid in case names are too long or not valid file names 
+				* symbolic links could be used to provide meaningful names
+				*/
 				ostringstream os;
 				os<<"db/"<<setfill('0')<<hex<<setw(16)<<get_hash<T>();
 				//static mmap_allocator_impl* a=new mmap_allocator_impl(string("db/")+typeid(T).name());
@@ -432,6 +494,7 @@ namespace pool_allocator{
 			typedef ptrdiff_t difference_type;
 			typedef random_access_iterator_tag iterator_category;
 			ptr_d(POOL_PTR pool_ptr=0,INDEX index=0):pool_ptr(pool_ptr),index(index){}
+			//should not be allowed if OPTIMIZATION used in ptr
 			template<
 				typename _OTHER_INDEX_,
 				typename _OTHER_PAYLOAD_,
@@ -441,6 +504,10 @@ namespace pool_allocator{
 			> ptr_d(const ptr<_OTHER_INDEX_,_OTHER_PAYLOAD_,_OTHER_ALLOCATOR_,_OTHER_RAW_ALLOCATOR_,_OTHER_MANAGEMENT_>& p):pool_ptr(get_pool<typename ptr<_OTHER_INDEX_,_OTHER_PAYLOAD_,_OTHER_ALLOCATOR_,_OTHER_RAW_ALLOCATOR_,_OTHER_MANAGEMENT_>::CELL>()),index(p.index){
 				_OTHER_PAYLOAD_* b=nullptr;
 				VALUE_TYPE* a=b;
+				#ifdef REF_COUNT
+				//how do we know if the pool_ptr is ref counted?
+				//derived class is not necessarily ref-counted
+				#endif
 			}
 			//construct from cell_iterator
 			template<
@@ -449,7 +516,7 @@ namespace pool_allocator{
 				typename _OTHER_ALLOCATOR_,
 				typename _OTHER_RAW_ALLOCATOR_,
 				typename _OTHER_MANAGEMENT_
-			> ptr_d(const cell_iterator<_OTHER_INDEX_,_OTHER_PAYLOAD_,_OTHER_ALLOCATOR_,_OTHER_RAW_ALLOCATOR_,_OTHER_MANAGEMENT_>& c):pool_ptr(get_pool<cell<_OTHER_INDEX_,_OTHER_PAYLOAD_,_OTHER_ALLOCATOR_,_OTHER_RAW_ALLOCATOR_,_OTHER_MANAGEMENT_>>()),index(c.index){
+			> ptr_d(const cell_iterator<_OTHER_INDEX_,_OTHER_PAYLOAD_,_OTHER_ALLOCATOR_,_OTHER_RAW_ALLOCATOR_,_OTHER_MANAGEMENT_>& c):pool_ptr(get_pool<cell<_OTHER_INDEX_,_OTHER_PAYLOAD_,_OTHER_ALLOCATOR_,_OTHER_RAW_ALLOCATOR_,_OTHER_MANAGEMENT_>>()),index(c.cell_index){
 			}
 			template<
 				typename _OTHER_INDEX_,
@@ -474,6 +541,7 @@ namespace pool_allocator{
 				return ptr<_OTHER_INDEX_,_OTHER_PAYLOAD_,_OTHER_ALLOCATOR_,_OTHER_RAW_ALLOCATOR_,_OTHER_MANAGEMENT_>(index);
 			}
 			value_type* operator->()const{
+				//is there any range checking?: no!!!!!, because there is no easy access to management
 				typedef cell<_INDEX_,_PAYLOAD_,_ALLOCATOR_,_RAW_ALLOCATOR_,_MANAGEMENT_> CELL;
 				return &pool_ptr->get_payload_cast<CELL>(index);
 			}
@@ -526,6 +594,7 @@ namespace pool_allocator{
 				typedef cell<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
 				return pointer(pool::get_pool<CELL>()->template allocate_at<CELL>(i,max<size_t>(n/CELL::FACTOR,1))*CELL::FACTOR);
 			}
+			//what if derived_pointer? should cast but maybe not
 			void deallocate(pointer p,size_type n){
 				typedef cell<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
 				pool::get_pool<CELL>()->template deallocate<CELL>(p.index/CELL::FACTOR,max<size_t>(n/CELL::FACTOR,1));
@@ -568,13 +637,23 @@ namespace pool_allocator{
 			*/
 			bool operator==(const allocator&)const{return true;}
 			bool operator!=(const allocator&)const{return false;}
+			size_t size() const{
+				typedef cell<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
+				return pool::get_pool<CELL>()->template get_cells<CELL>()[0].body.info.size;
+			}
 			//typed iterator
 			typedef cell_iterator<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> iterator;
 			typedef iterator const_iterator;
+			iterator begin(){return iterator();}
+			iterator end(){return iterator(size());}
+			const_iterator cbegin(){return const_iterator();}
+			const_iterator cend(){return const_iterator(size());}
+			/*
 			iterator begin(){return iterator(1);}
 			iterator end(){return iterator(1,0);}
 			const_iterator cbegin(){return const_iterator(1);}
 			const_iterator cend(){return const_iterator(1,0);}
+			*/
 			//helper function
 			template<typename... Args> static pointer construct_allocate(Args... args){
 				allocator a;
@@ -616,9 +695,13 @@ namespace pool_allocator{
 		char* buffer;
 		size_t buffer_size;//in byte, this causes problem when pool's buffer is not persisted 
 		const size_t cell_size;//in byte
+		const size_t stride;
 		const size_t payload_offset;
 		const size_t type_id;//
 		const bool iterable;
+		#ifdef REF_COUNT
+		//we need to know if the pool's payload uses ref counting
+		#endif
 		bool writable;
 		/*
 		*	shall we store the number of cells in pool instead of the buffer (c[0].body.info.size)
@@ -636,7 +719,9 @@ namespace pool_allocator{
 		> struct helper{
 			static typename CELL::ALLOCATOR::pointer go(){
 				typename CELL::RAW_ALLOCATOR raw;
-				size_t buffer_size=64*sizeof(CELL);
+				size_t cell_size=sizeof(CELL);
+				size_t stride=CELL::OPTIMIZATION ? sizeof(typename CELL::PAYLOAD) : cell_size;
+				size_t buffer_size=64*cell_size;
 				auto buffer=raw.allocate(buffer_size);//what about allocating CELL's instead of char?, it would have the advantage of aligning the data
 				CELL *c=(CELL*)buffer;
 				if(std::is_same<typename CELL::RAW_ALLOCATOR,std::allocator<char>>::value) memset(buffer,0,buffer_size);
@@ -650,7 +735,7 @@ namespace pool_allocator{
 				typename CELL::ALLOCATOR a;
 				auto p=a.allocate(1);
 				f_ptr f=pool::get_size<CELL>;
-				a.construct(p,buffer,buffer_size,sizeof(CELL),offsetof(CELL,body),str_hash(typeid(typename CELL::PAYLOAD).name()),CELL::MANAGED,f/*pool::get_size<CELL>*/);
+				a.construct(p,buffer,buffer_size,cell_size,stride,offsetof(CELL,body),str_hash(typeid(typename CELL::PAYLOAD).name()),CELL::MANAGED,f/*pool::get_size<CELL>*/);
 				return p;
 			}
 		};
@@ -673,11 +758,16 @@ namespace pool_allocator{
 				*	maybe the pool has been persisted 
 				*/ 
 				std::hash<std::string> str_hash;
-				size_t type_id=str_hash(typeid(typename CELL::PAYLOAD).name());
-				size_t buffer_size=64*sizeof(CELL);
+				//what if we use different allocators with same payload?
+				//size_t type_id=str_hash(typeid(typename CELL::PAYLOAD).name());
+				size_t type_id=str_hash(typeid(CELL).name());
+				size_t cell_size=sizeof(CELL);
+				size_t stride=CELL::OPTIMIZATION ? sizeof(typename CELL::PAYLOAD) : cell_size;
+				size_t buffer_size=64*cell_size;
 				typename CELL::ALLOCATOR a;
-				cerr<<"looking for pool `"<<typeid(typename CELL::PAYLOAD).name()<<"'"<<endl;
-				auto i=std::find_if(a.cbegin(),a.cend(),test(type_id));
+				//cerr<<"looking for pool `"<<typeid(typename CELL::PAYLOAD).name()<<"'"<<endl;
+				cerr<<"looking for pool `"<<typeid(CELL).name()<<"'\t"<<hex<<type_id<<dec<<"\t"<<a.size()<<endl;
+				auto i=std::find_if(a.cbegin(),a.cend(),[=](const pool& p){return p.type_id==type_id;});
 				if(i==a.cend()){
 					cerr<<"pool not found"<<endl;
 					typename CELL::RAW_ALLOCATOR raw;//what is the payload?
@@ -702,10 +792,11 @@ namespace pool_allocator{
 					else
 						cerr<<"create new persistent pool at index "<<(size_t)p.index<<endl;
 					f_ptr f=pool::get_size<CELL>;
-					a.construct(p,buffer,buffer_size,sizeof(CELL),offsetof(CELL,body),type_id,CELL::MANAGED,f/*pool::get_size<CELL>*/);
+					//a.construct(p,buffer,buffer_size,sizeof(CELL),sizeof(typename CELL::PAYLOAD),offsetof(CELL,body),type_id,CELL::MANAGED,f/*pool::get_size<CELL>*/);
+					a.construct(p,buffer,buffer_size,cell_size,stride,offsetof(CELL,body),type_id,CELL::MANAGED,f/*pool::get_size<CELL>*/);
 					return p;
 				}else{
-					cerr<<"pool found at index "<<(size_t)i.index<<endl;
+					cerr<<"pool found at index "<<(size_t)i.cell_index<<endl;
 					typename CELL::RAW_ALLOCATOR raw;
 					auto buffer=raw.allocate(buffer_size);
 					if(std::is_same<typename CELL::RAW_ALLOCATOR,std::allocator<char>>::value){
@@ -721,12 +812,13 @@ namespace pool_allocator{
 						c[1].body.info.next=0;
 					}
 					//we need a pointer to the pool	
-					typename CELL::ALLOCATOR::pointer p(i.index);
+					//typename CELL::ALLOCATOR::pointer p(i.index);
+					typename CELL::ALLOCATOR::pointer p(i);
 					//sanity check: has anything changed?
-					cerr<<p->cell_size<<" vs "<<sizeof(CELL)<<endl;
+					cerr<<p->cell_size<<" vs "<<cell_size<<endl;
 					cerr<<p->payload_offset<<" vs "<<offsetof(CELL,body)<<endl;
 					cerr<<p->iterable<<" vs "<<CELL::MANAGED<<endl;
-					if(p->cell_size==sizeof(CELL)&&p->payload_offset==offsetof(CELL,body)&&p->iterable==CELL::MANAGED){
+					if(p->cell_size==cell_size&&p->stride==stride&&p->payload_offset==offsetof(CELL,body)&&p->iterable==CELL::MANAGED){
 						//we only have to refresh the buffer and function pointers
 						p->buffer=buffer;
 						p->get_size_generic=pool::get_size<CELL>;
@@ -742,21 +834,18 @@ namespace pool_allocator{
 		};
 		//specialize for std::allocator<char*> as the RAW_ALLOCATOR
 		template<typename CELL> static typename CELL::ALLOCATOR::pointer create(){return helper<CELL>::go();}
-		pool(char* buffer,size_t buffer_size,size_t cell_size,size_t payload_offset,size_t type_id,bool iterable,f_ptr get_size_generic):buffer(buffer),buffer_size(buffer_size),cell_size(cell_size),payload_offset(payload_offset),type_id(type_id),writable(true),iterable(iterable),get_size_generic(get_size_generic){
+		pool(char* buffer,size_t buffer_size,size_t cell_size,size_t stride,size_t payload_offset,size_t type_id,bool iterable,f_ptr get_size_generic):buffer(buffer),buffer_size(buffer_size),cell_size(cell_size),stride(stride),payload_offset(payload_offset),type_id(type_id),writable(true),iterable(iterable),get_size_generic(get_size_generic){
 			cerr<<"new pool "<<(void*)buffer<<endl;
 			cerr<<"\tbuffer size:"<<buffer_size<<"\n";
 			cerr<<"\tcell size:"<<cell_size<<"\n";
-			cerr<<"\ttype id:"<<type_id<<"\n";
+			cerr<<"\tstride:"<<stride<<"\n";
+			cerr<<"\tpayload offset:"<<payload_offset<<"\n";
+			cerr<<"\ttype id:"<<hex<<type_id<<dec<<"\n";
+			cerr<<"\titerable:"<<iterable<<"\n";
 		}
-		struct test{
-			const size_t type_id;
-			test(size_t type_id):type_id(type_id){}
-			bool operator()(const pool& p)const{
-				//cerr<<hex<<"test:"<<type_id<<"=="<<p.type_id<<endl;
-				return p.type_id==type_id;
-			}
-		};
-
+		~pool(){
+			cerr<<"~pool()"<<endl;
+		}
 		template<typename CELL> CELL* get_cells(){
 			return (CELL*)buffer;
 		}
@@ -842,8 +931,10 @@ namespace pool_allocator{
 			CELL::post_deallocate(c+index,c+index+n);
 		}
 		template<typename CELL> typename CELL::PAYLOAD& get_payload(typename CELL::INDEX index){
+			//can we make a thread-safe version of this? actually what if we make a copy?
 			//cerr<<this<<" dereference cell at index "<<(int)index<<endl;
 			CELL *c=(CELL*)buffer;
+			//what if buffer gets modified here because of pool increase?
 			CELL::check(c[index]);//bounds checking
 			//return (typename CELL::PAYLOAD&)c[index].body.payload;	
 			return c[index].body.payload;	
@@ -856,7 +947,10 @@ namespace pool_allocator{
 		}
 		template<typename CELL> typename CELL::PAYLOAD& get_payload_cast(typename CELL::INDEX index){
 			//we don't know the actual type, only cell_size and payload_offset
-			return (typename CELL::PAYLOAD&)(*(buffer+index*cell_size+payload_offset));
+			char* p=buffer+index*stride;//we assume that a payload offset means there is a management
+			//cerr<<"management?:"<<payload_offset<<"\t"<<(int)(uint8_t)(*p)<<endl;
+			//if(payload_offset&&!(bool)(*p)) throw std::out_of_range("bad reference");	
+			return (typename CELL::PAYLOAD&)(*(p+payload_offset));
 		}
 		/*
 		*	find the pool or create it if it does not exist
@@ -973,7 +1067,7 @@ template<
 	_PAYLOAD_,
 	pool_allocator::pool::POOL_ALLOCATOR,
 	pool_allocator::pool::template mmap_allocator<_PAYLOAD_>,
-	uint8_t
+	bool
 >;
 template<
 	typename _PAYLOAD_,
@@ -993,8 +1087,21 @@ template<
 	_PAYLOAD_,
 	pool_allocator::pool::POOL_ALLOCATOR,
 	std::allocator<char>,
+	bool
+>;
+#ifdef REF_COUNT
+template<
+	typename _PAYLOAD_,
+	typename INDEX=uint8_t
+> using volatile_allocator_managed_rc=pool_allocator::pool::allocator<
+	INDEX,
+	_PAYLOAD_,
+	pool_allocator::pool::POOL_ALLOCATOR,
+	std::allocator<char>,
 	uint8_t
 >;
+
+#endif
 template<
 	typename _PAYLOAD_,
 	typename INDEX=uint8_t
