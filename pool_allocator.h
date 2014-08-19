@@ -1,5 +1,5 @@
-#ifndef SPECIAL_ALLOCATOR_H
-#define SPECIAL_ALLOCATOR_H
+#ifndef POOL_ALLOCATOR_H
+#define POOL_ALLOCATOR_H
 /*
  *	simplest allocator that works
  *
@@ -50,6 +50,9 @@ namespace pool_allocator{
 		typedef _INFO_ INFO;
 		//why would we make a copy?
 		cell(const cell&)=delete;
+		/*
+ 		*	would have management after payload give better packed structures?
+ 		*/ 
 		MANAGEMENT management; //store metadata, not visible to payload, can also be used to detect unauthorized access
 		union{
 			INFO info;
@@ -249,7 +252,9 @@ namespace pool_allocator{
 			bool operator!=(const ptr& a)const{return index!=a.index;}
 			bool operator<(const ptr& a)const{return index<a.index;}
 			bool operator>(const ptr& a)const{return index>a.index;}
-			operator value_type*() {return index ? operator->():0;}
+			operator value_type*(){return index ? operator->():0;}
+			//next lines causes g++ to complain but still build
+			//operator value_type*() const{return index ? operator->():0;}
 			bool operator==(value_type* a)const{return operator->()==a;}
 			void _print(ostream& os)const{}
 		};
@@ -527,6 +532,7 @@ namespace pool_allocator{
 				typename _OTHER_MANAGEMENT_
 			> ptr_d(const ptr_d<_OTHER_INDEX_,_OTHER_PAYLOAD_,_OTHER_ALLOCATOR_,_OTHER_RAW_ALLOCATOR_,_OTHER_MANAGEMENT_>& p):pool_ptr(p.pool_ptr),index(p.index){
 				//there is not enough information to check the validity of that operation
+				//but there should be a relation-ship between PAYLOADS...
 			}
 
 			template<
@@ -571,7 +577,8 @@ namespace pool_allocator{
 			typedef ptr<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> pointer;
 			typedef	ptr<INDEX,const PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> const_pointer; 
 			typedef ptr_d<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> derived_pointer;
-			typedef ptr_d<INDEX,const PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> const_derived_pointer;
+			typedef ptr_d<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> generic_pointer;
+			typedef ptr_d<INDEX,const PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> const_generic_pointer;
 			typedef typename pointer::value_type value_type;
 			typedef typename pointer::reference reference;
 			//we have to decide if const pointers use different pool
@@ -589,16 +596,16 @@ namespace pool_allocator{
 			pointer allocate(size_type n){
 				cerr<<"allocate "<<n<<" elements"<<endl;
 				typedef cell<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
-				return pointer(pool::get_pool<CELL>()->template allocate<CELL>(max<size_t>(n/CELL::FACTOR,1))*CELL::FACTOR);
+				return pointer(pool::get_pool<CELL>()->template allocate<CELL>(max<size_t>(ceil(1.0*n/CELL::FACTOR),1))*CELL::FACTOR);
 			}
 			pointer allocate_at(INDEX i,size_type n){
 				typedef cell<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
-				return pointer(pool::get_pool<CELL>()->template allocate_at<CELL>(i,max<size_t>(n/CELL::FACTOR,1))*CELL::FACTOR);
+				return pointer(pool::get_pool<CELL>()->template allocate_at<CELL>(i,max<size_t>(ceil(1.0*n/CELL::FACTOR),1))*CELL::FACTOR);
 			}
 			//what if derived_pointer? should cast but maybe not
 			void deallocate(pointer p,size_type n){
 				typedef cell<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
-				pool::get_pool<CELL>()->template deallocate<CELL>(p.index/CELL::FACTOR,max<size_t>(n/CELL::FACTOR,1));
+				pool::get_pool<CELL>()->template deallocate<CELL>(p.index/CELL::FACTOR,max<size_t>(ceil(1.0*n/CELL::FACTOR),1));
 			}
 			//if this function is needed it means the container does not use the pointer type and persistence will fail
 			/*void deallocate(value_type* p,size_type n){
@@ -867,10 +874,14 @@ namespace pool_allocator{
 			return i;
 		}
 		template<typename CELL> typename CELL::INDEX allocate(size_t n){
+			#ifdef POOL_ALLOCATOR_VERBOSE
+			display<CELL>();
+			#endif
 			CELL *c=(CELL*)buffer;
 			typedef typename CELL::INDEX INDEX;
 			INDEX prev=0,current=c[prev].body.info.next;
 			//cerr<<"current: "<<(int)current<<endl;
+			//this should be made thread-safe
 			while(current && c[current].body.info.size<n){
 				cerr<<"\t"<<(int)current<<endl;
 				prev=current;
@@ -912,23 +923,101 @@ namespace pool_allocator{
 				buffer=new_buffer;
 				CELL *c=(CELL*)buffer;
 				//add the new range
+				#ifdef OPTIM_POS
+				/*
+ 				*	add after last region
+ 				*/ 
+				current=buffer_size/cell_size;	
+				c[current].body.info.size=(new_buffer_size-buffer_size)/cell_size;
+				c[current].body.info.next=0;
+				c[prev].body.info.next=current;	
+				//connect
+				if(prev+c[prev].body.info.size==current){
+					c[prev].body.info.size+=c[current].body.info.size;
+					c[prev].body.info.next=c[current].body.info.next;
+				}
+				#else
 				c[buffer_size/cell_size].body.info.size=(new_buffer_size-buffer_size)/cell_size;
 				c[buffer_size/cell_size].body.info.next=c[0].body.info.next;
 				c[0].body.info.next=buffer_size/cell_size;	
+				#endif
 				buffer_size=new_buffer_size;
 				return allocate<CELL>(n);
 			}
 			cerr<<this<<" allocate "<<n<<" cell(s) at index "<<(int)current<<" for "<<typeid(typename CELL::PAYLOAD).name()<<endl;
 			return current;
 		}	
+		template<typename CELL> void display() const{
+			CELL *c=(CELL*)buffer;
+			typedef typename CELL::INDEX INDEX;
+			INDEX prev=0,current=c[prev].body.info.next;
+			while(current){
+				cerr<<(int)current<<"\t"<<(int)c[current].body.info.size<<"\t"<<(int)c[current].body.info.next<<endl;
+				prev=current;
+				current=c[prev].body.info.next;
+			}
+		}
 		template<typename CELL> void deallocate(typename CELL::INDEX index,size_t n){
 			cerr<<this<<" deallocate "<<n<<" cell(s) at index "<<(int)index<<endl;
 			CELL *c=(CELL*)buffer;
 			typedef typename CELL::INDEX INDEX;
+			#ifdef POOL_ALLOCATOR_VERBOSE
+			display<CELL>();
+			#endif
+			#ifdef OPTIM_POS
+			/*
+ 			*	we should insert at right position and connect adjacent regions
+ 			*/ 
+			INDEX prev=0,current=c[prev].body.info.next;
+			while(current && current<index){
+				cerr<<"\t"<<(int)current<<endl;
+				prev=current;
+				current=c[prev].body.info.next;
+			}
+			/*
+ 			* 4 possibilities:
+ 			* 	.connected to prev
+ 			* 	.isolated
+ 			* 	.connected to current
+ 			* 	.connected to both (bingo!)
+ 			*/
+			if(current){
+				if(prev+c[prev].body.info.size==index){//connected to prev
+					if(index+n==current){//perfect fit
+						c[prev].body.info.size+=n+c[current].body.info.size;
+						c[prev].body.info.next=c[current].body.info.next;
+					}else{
+						c[prev].body.info.size+=n;
+						c[prev].body.info.next=current;
+					}
+				}else{
+					if(index+n==current){//connected to current
+						c[index].body.info.size=n+c[current].body.info.size;
+						c[index].body.info.next=c[current].body.info.next;
+						c[prev].body.info.next=index;
+					}else{//isolated
+						c[index].body.info.size=n;
+						c[index].body.info.next=current;
+						c[prev].body.info.next=index;
+					}
+				}	
+				c[0].body.info.size-=n;//update total number of cells in use
+			}else{//at end of array
+				if(prev+c[prev].body.info.size==index){//connected to prev
+					c[prev].body.info.size+=n;
+					c[prev].body.info.next=current;
+				}else{
+					c[index].body.info.size=n;
+					c[index].body.info.next=current;
+					c[prev].body.info.next=index;
+				}
+			}
+			#else
 			c[index].body.info.size=n;
 			c[index].body.info.next=c[0].body.info.next;
-			c[0].body.info.next=index;
+			c[0].body.info.next=index;//the last de-allocated region is always first: not optimal 
 			c[0].body.info.size-=n;//update total number of cells in use
+			#endif
 			CELL::post_deallocate(c+index,c+index+n);
 		}
 		template<typename CELL> typename CELL::PAYLOAD& get_payload(typename CELL::INDEX index){
