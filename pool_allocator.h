@@ -618,6 +618,15 @@ namespace pool_allocator{
 				typedef cell<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
 				return pointer(pool::get_pool<CELL>()->template allocate_at<CELL>(i,max<size_t>(ceil(1.0*n/CELL::FACTOR),1))*CELL::FACTOR);
 			}
+			pointer ring_allocate(){
+				//behaves like normal allocate until we reach maximum size after that return address of cell
+				typedef cell<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
+				//why not MAX_SIZE????????????
+				if(pool::get_pool<CELL>()->template get_cells<CELL>()[0].body.info.size<CELL::MAX_SIZE-1) return allocate(1);
+				static INDEX current=0;
+				current=(current==CELL::MAX_SIZE-1) ? 1 : current+1;
+				return pointer(current);
+			}
 			//what if derived_pointer? should cast but maybe not
 			void deallocate(pointer p,size_type n){
 				typedef cell<INDEX,PAYLOAD,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
@@ -1073,6 +1082,10 @@ namespace pool_allocator{
 		*	find the pool or create it if it does not exist
 		*/ 
 		template<typename CELL> static typename CELL::ALLOCATOR::pointer get_pool(){
+			/*
+ 			* should be thread safe according to:
+			* http://stackoverflow.com/questions/8102125/is-local-static-variable-initialization-thread-safe-in-c11
+			*/
 			static auto p=create<CELL>();
 			return p;
 		}
