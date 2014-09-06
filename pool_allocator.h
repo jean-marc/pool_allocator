@@ -98,7 +98,7 @@ namespace pool_allocator{
 		}
 		//check if the cell has been allocated
 		static void check(cell& c){
-			if(!c.management) throw std::out_of_range("bad reference");	
+			if(!c.management) throw std::out_of_range(string("bad reference for ")+typeid(PAYLOAD).name());	
 		}
 		#ifdef REF_COUNT
 		static void increase_ref_count(cell& c){++c.management;}
@@ -337,7 +337,7 @@ namespace pool_allocator{
 			bool operator!=(const ptr& a)const{return index!=a.index;}
 			bool operator<(const ptr& a)const{return index<a.index;}
 			bool operator>(const ptr& a)const{return index>a.index;}
-			operator value_type*() {return index ? operator->():0;}
+			operator value_type*() const {return index ? operator->():0;}
 			void _print(ostream& os)const{}
 		};
 		/*
