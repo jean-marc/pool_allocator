@@ -86,6 +86,7 @@ namespace pool_allocator{
 		enum{FACTOR=1};
 		//enum{MAX_SIZE=(1L<<(sizeof(INDEX)<<3))-1};//because cell[0] is used for management, wouldn't it be simpler if we stored that info somewhere else?
 		enum{MAX_SIZE=std::numeric_limits<INDEX>::max()-1};
+		static const INDEX max_index=std::numeric_limits<INDEX>::max();
 		static void post_allocate(cell* begin,cell* end){
 			for(cell* i=begin;i<end;++i) i->management=0x1;//will increase for reference counting	
 		}
@@ -132,6 +133,7 @@ namespace pool_allocator{
 		enum{FACTOR=OPTIMIZATION ? sizeof(INFO)/sizeof(PAYLOAD) : 1};
 		//enum{MAX_SIZE=(1L<<(sizeof(INDEX)<<3))/FACTOR-1};
 		enum{MAX_SIZE=std::numeric_limits<INDEX>::max()/FACTOR-1};
+		static const INDEX max_index=std::numeric_limits<INDEX>::max()/FACTOR;
 		static void post_allocate(cell*,cell*){}
 		static void post_deallocate(cell*,cell*){}
 		static void is_available(cell* begin,cell* end){}
@@ -167,7 +169,9 @@ namespace pool_allocator{
 			typedef VALUE_TYPE& reference;
 			typedef ptrdiff_t difference_type;
 			typedef random_access_iterator_tag iterator_category;
-			/*explicit*/ ptr(INDEX index=0):index(index){}
+			ptr(std::nullptr_t=nullptr):index(0){}
+			//create ambiguity when ptr(0) add parameter to disambiguate
+			explicit ptr(INDEX index,int):index(index){}
 			#ifdef REF_COUNT
 			ptr(const ptr& p):index(p.index){
 				if(is_same<MANAGEMENT,uint8_t>::value){	
@@ -200,6 +204,7 @@ namespace pool_allocator{
 				}
 				return *this;
 			}
+			
 			~ptr(){
 				if(is_same<MANAGEMENT,uint8_t>::value){	
 					cerr<<"~ptr"<<endl;
@@ -272,7 +277,9 @@ namespace pool_allocator{
 			bool operator==(const ptr& a)const{return index==a.index;}
 			bool operator!=(const ptr& a)const{return index!=a.index;}
 			bool operator<(const ptr& a)const{return index<a.index;}
+			bool operator<=(const ptr& a)const{return index<=a.index;}
 			bool operator>(const ptr& a)const{return index>a.index;}
+			bool operator>=(const ptr& a)const{return index>=a.index;}
 			/*
  			*  template <typename FancyPtr>
  			*  auto trueaddress(FancyPtr ptr) {  
@@ -302,7 +309,8 @@ namespace pool_allocator{
 			typedef const VALUE_TYPE& reference;
 			typedef ptrdiff_t difference_type;
 			typedef random_access_iterator_tag iterator_category;
-			ptr(INDEX index=0):index(index){}
+			ptr(std::nullptr_t=nullptr):index(0){}
+			ptr(INDEX index,int):index(index){}
 			ptr(const ptr<VALUE_TYPE,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>& p):index(p.index){}
 			//no casting between different types	
 			template<
@@ -387,7 +395,7 @@ namespace pool_allocator{
 				while(!pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].management) ++cell_index;
 				return cell_index;
 			}
-			operator ptr<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>(){return ptr<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>(get_cell_index());}
+			operator ptr<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>(){return ptr<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>(get_cell_index(),0);}
 		};
 		/*
 		*	allocate memory on file
@@ -528,7 +536,8 @@ namespace pool_allocator{
 			typedef VALUE_TYPE& reference;
 			typedef ptrdiff_t difference_type;
 			typedef random_access_iterator_tag iterator_category;
-			ptr_d(POOL_PTR pool_ptr=0,INDEX index=0):pool_ptr(pool_ptr),index(index){}
+			ptr_d(POOL_PTR pool_ptr=nullptr,INDEX index=0):pool_ptr(pool_ptr),index(index){}
+			//ptr_d(std::nullptr_t):pool_ptr(nullptr),index(0){}
 			//should not be allowed if OPTIMIZATION used in ptr
 			template<
 				typename _OTHER_PAYLOAD_,
@@ -632,11 +641,11 @@ namespace pool_allocator{
 			pointer allocate(size_type n){
 				cerr<<"allocate "<<n<<" elements"<<endl;
 				typedef cell<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
-				return pointer(pool::get_pool<CELL>()->template allocate<CELL>(max<size_t>(ceil(1.0*n/CELL::FACTOR),1))*CELL::FACTOR);
+				return pointer(pool::get_pool<CELL>()->template allocate<CELL>(max<size_t>(ceil(1.0*n/CELL::FACTOR),1))*CELL::FACTOR,0);
 			}
 			pointer allocate_at(INDEX i,size_type n){
 				typedef cell<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
-				return pointer(pool::get_pool<CELL>()->template allocate_at<CELL>(i,max<size_t>(ceil(1.0*n/CELL::FACTOR),1))*CELL::FACTOR);
+				return pointer(pool::get_pool<CELL>()->template allocate_at<CELL>(i,max<size_t>(ceil(1.0*n/CELL::FACTOR),1))*CELL::FACTOR,0);
 			}
 			pointer ring_allocate(){
 				//behaves like normal allocate until we reach maximum size after that return address of cell
@@ -645,7 +654,7 @@ namespace pool_allocator{
 				if(pool::get_pool<CELL>()->template get_cells<CELL>()[0].body.info.size<CELL::MAX_SIZE) return allocate(1);
 				static INDEX current=0;
 				current=(current==CELL::MAX_SIZE) ? 1 : current+1;
-				return pointer(current);
+				return pointer(current,0);
 			}
 			//what if derived_pointer? should cast but maybe not
 			void deallocate(pointer p,size_type n){
@@ -698,6 +707,7 @@ namespace pool_allocator{
 			typedef cell_iterator<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> iterator;
 			typedef iterator const_iterator;
 			iterator begin(){return iterator();}
+			//would be nice if end iterator would be cast to null pointer? does it make sense?
 			iterator end(){return iterator(size());}
 			const_iterator cbegin(){return const_iterator();}
 			const_iterator cend(){return const_iterator(size());}
@@ -923,9 +933,25 @@ namespace pool_allocator{
 		}
 		//should only allocate 1 cell at a time, must not be mixed with allocate()!
 		template<typename CELL> typename CELL::INDEX allocate_at(typename CELL::INDEX i,size_t n){
+			/*
+ 			*	do we have to grow the pool?
+ 			*/	 
+			if(buffer_size<(i+n-1)*cell_size){
+				if((i+n-1)>CELL::max_index) throw std::bad_alloc();
+				size_t new_buffer_size=(i+n)*cell_size;
+				cerr<<this<<" increasing pool size from "<<buffer_size<<" to "<<new_buffer_size<<endl;
+				typename CELL::RAW_ALLOCATOR raw;
+				auto new_buffer=raw.allocate(new_buffer_size);
+				//the next 3 stages must be avoided when dealing with mmap
+				if(std::is_same<typename CELL::RAW_ALLOCATOR,std::allocator<char>>::value){
+					memcpy(new_buffer,buffer,buffer_size);
+					memset(new_buffer+buffer_size,0,new_buffer_size-buffer_size);
+					raw.deallocate(buffer,buffer_size);	
+				}
+				buffer=new_buffer;
+				buffer_size=new_buffer_size;
+			}
 			CELL *c=(CELL*)buffer;
-			typedef typename CELL::INDEX INDEX;
-			//check if cells available
 			CELL::is_available(c+i,c+i+n);
 			c[0].body.info.size+=n;//update total number of cells in use
 			CELL::post_allocate(c+i,c+i+n);
