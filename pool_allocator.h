@@ -84,9 +84,9 @@ namespace pool_allocator{
 		enum{MANAGED=true};
 		enum{OPTIMIZATION=false};
 		enum{FACTOR=1};
-		//enum{MAX_SIZE=(1L<<(sizeof(INDEX)<<3))-1};//because cell[0] is used for management, wouldn't it be simpler if we stored that info somewhere else?
+		enum{MAX_BUFFER_SIZE=1L<<(sizeof(INDEX)<<3)};
 		enum{MAX_SIZE=std::numeric_limits<INDEX>::max()-1};
-		static const INDEX max_index=std::numeric_limits<INDEX>::max();
+		static const INDEX max_index=std::numeric_limits<INDEX>::max();//max_index and MAX_SIZE are the same because cell 0 is off-limit
 		static void post_allocate(cell* begin,cell* end){
 			for(cell* i=begin;i<end;++i) i->management=0x1;//will increase for reference counting	
 		}
@@ -131,7 +131,7 @@ namespace pool_allocator{
 		enum{OPTIMIZATION=(sizeof(INFO)>sizeof(PAYLOAD))&&(sizeof(INFO)%sizeof(PAYLOAD)==0)};
 		//enum{OPTIMIZATION=false};
 		enum{FACTOR=OPTIMIZATION ? sizeof(INFO)/sizeof(PAYLOAD) : 1};
-		//enum{MAX_SIZE=(1L<<(sizeof(INDEX)<<3))/FACTOR-1};
+		enum{MAX_BUFFER_SIZE=(1L<<(sizeof(INDEX)<<3))/FACTOR};
 		enum{MAX_SIZE=std::numeric_limits<INDEX>::max()/FACTOR-1};
 		static const INDEX max_index=std::numeric_limits<INDEX>::max()/FACTOR;
 		static void post_allocate(cell*,cell*){}
@@ -345,6 +345,7 @@ namespace pool_allocator{
 			bool operator!=(const ptr& a)const{return index!=a.index;}
 			bool operator<(const ptr& a)const{return index<a.index;}
 			bool operator>(const ptr& a)const{return index>a.index;}
+			//cast operator
 			operator value_type*() const {return index ? operator->():0;}
 			void _print(ostream& os)const{}
 		};
@@ -647,14 +648,21 @@ namespace pool_allocator{
 				typedef cell<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
 				return pointer(pool::get_pool<CELL>()->template allocate_at<CELL>(i,max<size_t>(ceil(1.0*n/CELL::FACTOR),1))*CELL::FACTOR,0);
 			}
-			pointer ring_allocate(){
-				//behaves like normal allocate until we reach maximum size after that return address of cell
-				//what happens if a cell is deallocated?
+			//will wrap when pointer reaches last
+			pointer ring_allocate(INDEX last){
 				typedef cell<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
-				if(pool::get_pool<CELL>()->template get_cells<CELL>()[0].body.info.size<CELL::MAX_SIZE) return allocate(1);
-				static INDEX current=0;
-				current=(current==CELL::MAX_SIZE) ? 1 : current+1;
-				return pointer(current,0);
+				auto tmp=allocate(1);
+				//now make sure there is a cell available for next allocation by deallocating next cell
+				if(size()==last){//the next allocation should be at 1
+					auto next=tmp+1;
+					if(!next.index || next.index > last) next.index=1;
+					//why doesn't this compile???????
+					//if(next==nullptr) ++next;
+					cerr<<"deallocate cell "<<(int)next.index<<endl;
+					deallocate(next,1);
+					cerr<<"new size:"<<size()<<endl;
+				}
+				return tmp;
 			}
 			//what if derived_pointer? should cast but maybe not
 			void deallocate(pointer p,size_type n){
@@ -1008,14 +1016,14 @@ namespace pool_allocator{
 				//it all depends where the last cell is
 				size_t new_size=0;
 				//does not work if prev is 0!!!
-				if(prev>0 && prev+c[prev].body.info.size==buffer_size/cell_size){
+				if(prev && prev+c[prev].body.info.size==buffer_size/cell_size){
 					cerr<<"last cell!"<<endl;
 					new_size=n-c[prev].body.info.size;
 				}else{
 					new_size=n;
 				}
-				cerr<<"new size:"<<(buffer_size/cell_size)+new_size<<"\tmax:"<<(CELL::MAX_SIZE+1)<<endl;
-				if(((buffer_size/cell_size)+new_size-1)>(CELL::MAX_SIZE)) throw std::bad_alloc();
+				cerr<<"new buffer size:"<<(buffer_size/cell_size)+new_size<<" vs "<<(CELL::MAX_BUFFER_SIZE)<<endl;
+				if(((buffer_size/cell_size)+new_size)>(CELL::MAX_BUFFER_SIZE)) throw std::bad_alloc();
 				size_t new_buffer_size=buffer_size+new_size*cell_size;
 				/*
 				#ifdef OPTIM_POS
@@ -1046,14 +1054,19 @@ namespace pool_allocator{
 				/*
  				*	add after last region
  				*/ 
-				current=buffer_size/cell_size;	
-				c[current].body.info.size=(new_buffer_size-buffer_size)/cell_size;
-				c[current].body.info.next=0;
-				c[prev].body.info.next=current;	
-				//connect
-				if(prev>0 && prev+c[prev].body.info.size==current){
-					c[prev].body.info.size+=c[current].body.info.size;
-					c[prev].body.info.next=c[current].body.info.next;
+				if(buffer_size/cell_size==CELL::MAX_BUFFER_SIZE){//pool is full
+					c[0].body.info.size=CELL::MAX_BUFFER_SIZE-1;
+					c[0].body.info.next=0;
+				}else{
+					current=buffer_size/cell_size;	
+					c[current].body.info.size=(new_buffer_size-buffer_size)/cell_size;
+					c[current].body.info.next=0;
+					c[prev].body.info.next=current;	
+					//connect
+					if(prev && prev+c[prev].body.info.size==current){
+						c[prev].body.info.size+=c[current].body.info.size;
+						c[prev].body.info.next=c[current].body.info.next;
+					}
 				}
 				#else
 				c[buffer_size/cell_size].body.info.size=(new_buffer_size-buffer_size)/cell_size;
@@ -1100,8 +1113,11 @@ namespace pool_allocator{
  			* 	.connected to current
  			* 	.connected to both (bingo!)
  			*/
+			#ifdef POOL_ALLOCATOR_VERBOSE
+			cerr<<"deallocate: prev,current {"<<(int)prev<<","<<(int)current<<"}"<<endl;
+			#endif
 			if(current){
-				if(prev+c[prev].body.info.size==index){//connected to prev
+				if(prev && (prev+c[prev].body.info.size==index)){//connected to prev
 					if(index+n==current){//perfect fit
 						c[prev].body.info.size+=n+c[current].body.info.size;
 						c[prev].body.info.next=c[current].body.info.next;
@@ -1120,9 +1136,8 @@ namespace pool_allocator{
 						c[prev].body.info.next=index;
 					}
 				}	
-				c[0].body.info.size-=n;//update total number of cells in use
 			}else{//at end of array
-				if(prev+c[prev].body.info.size==index){//connected to prev
+				if(prev && prev+c[prev].body.info.size==index){//connected to prev
 					c[prev].body.info.size+=n;
 					c[prev].body.info.next=current;
 				}else{
@@ -1131,6 +1146,7 @@ namespace pool_allocator{
 					c[prev].body.info.next=index;
 				}
 			}
+			c[0].body.info.size-=n;//update total number of cells in use
 			#else
 			c[index].body.info.size=n;
 			c[index].body.info.next=c[0].body.info.next;
