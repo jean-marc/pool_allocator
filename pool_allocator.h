@@ -84,8 +84,9 @@ namespace pool_allocator{
 		enum{MANAGED=true};
 		enum{OPTIMIZATION=false};
 		enum{FACTOR=1};
-		enum{MAX_BUFFER_SIZE=1L<<(sizeof(INDEX)<<3)};
-		enum{MAX_SIZE=std::numeric_limits<INDEX>::max()-1};
+		//enum is too small on ARM 32
+		static const size_t MAX_BUFFER_SIZE=1ULL<<(sizeof(INDEX)<<3);
+		static const size_t MAX_SIZE=std::numeric_limits<INDEX>::max()-1;
 		static const INDEX max_index=std::numeric_limits<INDEX>::max();//max_index and MAX_SIZE are the same because cell 0 is off-limit
 		static void post_allocate(cell* begin,cell* end){
 			for(cell* i=begin;i<end;++i) i->management=0x1;//will increase for reference counting	
@@ -131,8 +132,8 @@ namespace pool_allocator{
 		enum{OPTIMIZATION=(sizeof(INFO)>sizeof(PAYLOAD))&&(sizeof(INFO)%sizeof(PAYLOAD)==0)};
 		//enum{OPTIMIZATION=false};
 		enum{FACTOR=OPTIMIZATION ? sizeof(INFO)/sizeof(PAYLOAD) : 1};
-		enum{MAX_BUFFER_SIZE=(1L<<(sizeof(INDEX)<<3))/FACTOR};
-		enum{MAX_SIZE=std::numeric_limits<INDEX>::max()/FACTOR-1};
+		static const size_t MAX_BUFFER_SIZE=(1ULL<<(sizeof(INDEX)<<3))/FACTOR;
+		static const size_t MAX_SIZE=std::numeric_limits<INDEX>::max()/FACTOR-1;
 		static const INDEX max_index=std::numeric_limits<INDEX>::max()/FACTOR;
 		static void post_allocate(cell*,cell*){}
 		static void post_deallocate(cell*,cell*){}
@@ -719,12 +720,11 @@ namespace pool_allocator{
 			iterator end(){return iterator(size());}
 			const_iterator cbegin(){return const_iterator();}
 			const_iterator cend(){return const_iterator(size());}
-			/*
-			iterator begin(){return iterator(1);}
-			iterator end(){return iterator(1,0);}
-			const_iterator cbegin(){return const_iterator(1);}
-			const_iterator cend(){return const_iterator(1,0);}
-			*/
+			//experimental, UNSAFE!!!
+			PAYLOAD& operator[](size_t index){
+				return *pointer(index,0);
+			}
+			
 			//helper function
 			template<typename... Args> static pointer construct_allocate(Args... args){
 				allocator a;
