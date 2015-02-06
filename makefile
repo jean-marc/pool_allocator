@@ -1,5 +1,5 @@
 CC = g++ -I .  
-CFLAGS = -O3 -std=c++0x -UREF_COUNT -lpthread
+CFLAGS = -O3 -std=c++0x -UREF_COUNT -lpthread -UOPTIM_POS -DFIX_AMBIGUITY
 %.o:%.cpp %.h
 	$(CC) -c $(CFLAGS) $< -o $@
 test%:test%.cpp pool_allocator.h

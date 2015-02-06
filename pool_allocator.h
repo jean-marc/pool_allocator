@@ -288,10 +288,15 @@ namespace pool_allocator{
  			*  }
  			*  see https://rawgit.com/google/cxx-std-draft/allocator-paper/allocator_user_guide.html
  			*/
+			//make cast operators explicit otherwise ambiguous calls to operator== and +
+			explicit operator bool() const{return index;}
+			#ifdef FIX_AMBIGUITY
+			explicit operator value_type*(){return index ? operator->():0;}
+			explicit operator const value_type*() const{return index ? operator->():0;}
+			#else
 			operator value_type*(){return index ? operator->():0;}
-			//next lines causes g++ to complain but still build
-			//operator value_type*() const{return index ? operator->():0;}
-			//bool operator==(value_type* a)const{return operator->()==a;}
+			operator const value_type*() const{return index ? operator->():0;}
+			#endif
 			void _print(ostream& os)const{}
 		};
 		//specialized for const VALUE_TYPE
@@ -310,7 +315,7 @@ namespace pool_allocator{
 			typedef const VALUE_TYPE& reference;
 			typedef ptrdiff_t difference_type;
 			typedef random_access_iterator_tag iterator_category;
-			ptr(std::nullptr_t=nullptr):index(0){}
+			ptr(std::nullptr_t p=nullptr):index(0){}
 			ptr(INDEX index,int):index(index){}
 			ptr(const ptr<VALUE_TYPE,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>& p):index(p.index){}
 			//no casting between different types	
@@ -347,7 +352,12 @@ namespace pool_allocator{
 			bool operator<(const ptr& a)const{return index<a.index;}
 			bool operator>(const ptr& a)const{return index>a.index;}
 			//cast operator
-			operator value_type*() const {return index ? operator->():0;}
+			explicit operator bool() const{return index;}
+			#ifdef FIX_AMBIGUITY
+			explicit operator value_type*(){return index ? operator->():0;}
+			#else
+			operator value_type*(){return index ? operator->():0;}
+			#endif
 			void _print(ostream& os)const{}
 		};
 		/*
@@ -538,8 +548,8 @@ namespace pool_allocator{
 			typedef VALUE_TYPE& reference;
 			typedef ptrdiff_t difference_type;
 			typedef random_access_iterator_tag iterator_category;
+			ptr_d(std::nullptr_t):pool_ptr(nullptr),index(0){}
 			ptr_d(POOL_PTR pool_ptr=nullptr,INDEX index=0):pool_ptr(pool_ptr),index(index){}
-			//ptr_d(std::nullptr_t):pool_ptr(nullptr),index(0){}
 			//should not be allowed if OPTIMIZATION used in ptr
 			template<
 				typename _OTHER_PAYLOAD_,
@@ -602,7 +612,15 @@ namespace pool_allocator{
 			ptr_d& operator--(){--index;return *this;}
 			bool operator==(const ptr_d& a)const{return pool_ptr==a.pool_ptr&&index==a.index;}
 			bool operator!=(const ptr_d& a)const{return pool_ptr!=a.pool_ptr||index!=a.index;}
-			operator value_type*() {return index ? operator->():0;}
+			//cast operator
+			explicit operator bool() const{return index;}
+			#ifdef FIX_AMBIGUITY
+			explicit operator value_type*(){return index ? operator->():0;}
+			explicit operator const value_type*() const{return index ? operator->():0;}
+			#else
+			operator value_type*(){return index ? operator->():0;}
+			operator const value_type*() const{return index ? operator->():0;}
+			#endif
 			void _print(ostream& os)const{}
 		};
 		/*
@@ -689,7 +707,11 @@ namespace pool_allocator{
 			}
 			template<typename... Args> void construct(pointer p,Args... args){
 				cerr<<"construct at "<<(int)p.index<<"("<<(void*)p.operator->()<<")"<<endl;
+				#ifdef FIX_AMBIGUITY
+				new((PAYLOAD*)p) value_type(args...);
+				#else
 				new(p) value_type(args...);
+				#endif
 			}
 			void destroy(pointer p){
 				cerr<<"destroy at "<<(int)p.index<<endl;
