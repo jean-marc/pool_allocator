@@ -573,7 +573,8 @@ namespace pool_allocator{
 				typename _OTHER_MANAGEMENT_
 			> ptr_d(const ptr_d<_OTHER_PAYLOAD_,_OTHER_INDEX_,_OTHER_ALLOCATOR_,_OTHER_RAW_ALLOCATOR_,_OTHER_MANAGEMENT_>& p):pool_ptr(p.pool_ptr),index(p.index){
 				_OTHER_PAYLOAD_* b=nullptr;
-				VALUE_TYPE* a=b;
+				//more work needed here when up-casting
+				//VALUE_TYPE* a=b;
 				//there is not enough information to check the validity of that operation
 				//but there should be a relation-ship between PAYLOADS...
 			}
