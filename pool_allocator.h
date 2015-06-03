@@ -84,9 +84,8 @@ namespace pool_allocator{
 		enum{MANAGED=true};
 		enum{OPTIMIZATION=false};
 		enum{FACTOR=1};
-		//enum is too small on ARM 32
-		static const size_t MAX_BUFFER_SIZE=1ULL<<(sizeof(INDEX)<<3);
-		static const size_t MAX_SIZE=std::numeric_limits<INDEX>::max()-1;
+		static const size_t MAX_SIZE=std::numeric_limits<INDEX>::max();
+		static const size_t MAX_BUFFER_SIZE=MAX_SIZE+1;//what if MAX_SIZE+1=0 that is INDEX=size_t
 		static const INDEX max_index=std::numeric_limits<INDEX>::max();//max_index and MAX_SIZE are the same because cell 0 is off-limit
 		static void post_allocate(cell* begin,cell* end){
 			for(cell* i=begin;i<end;++i) i->management=0x1;//will increase for reference counting	
@@ -617,6 +616,10 @@ namespace pool_allocator{
 			ptr_d& operator--(){--index;return *this;}
 			bool operator==(const ptr_d& a)const{return pool_ptr==a.pool_ptr&&index==a.index;}
 			bool operator!=(const ptr_d& a)const{return pool_ptr!=a.pool_ptr||index!=a.index;}
+			bool operator<(const ptr_d& a)const{
+				if(pool_ptr==a.pool_ptr) return index<a.index;
+				return pool_ptr<a.pool_ptr;
+			}
 			//cast operator
 			explicit operator bool() const{return index;}
 			#ifdef FIX_AMBIGUITY
@@ -658,6 +661,8 @@ namespace pool_allocator{
 			typedef std::ptrdiff_t difference_type;
 			allocator(){}
 			~allocator(){}
+			//what is the problem with this?
+			typedef cell<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
 			//this is a upper boundary of the maximum size 
 			size_type max_size() const throw(){
 				typedef cell<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
@@ -828,7 +833,7 @@ namespace pool_allocator{
 				size_t type_id=str_hash(typeid(CELL).name());
 				size_t cell_size=sizeof(CELL);
 				size_t stride=CELL::OPTIMIZATION ? sizeof(typename CELL::PAYLOAD) : cell_size;
-				size_t buffer_size=64*cell_size;
+				size_t buffer_size=128*cell_size;
 				typename CELL::ALLOCATOR a;
 				//LOG<<"looking for pool `"<<typeid(typename CELL::PAYLOAD).name()<<"'"<<endl;
 				LOG<<"looking for pool `"<<typeid(CELL).name()<<"'\t"<<hex<<type_id<<dec<<"\t"<<a.size()<<endl;
@@ -915,7 +920,7 @@ namespace pool_allocator{
 				size_t type_id=str_hash(typeid(pool).name());//use the payload instead of cell type for consistency with filename
 				size_t cell_size=sizeof(CELL);
 				size_t stride=CELL::OPTIMIZATION ? sizeof(typename CELL::PAYLOAD) : cell_size;
-				size_t buffer_size=64*cell_size;//this is dangerous because the file_size might be bigger!
+				size_t buffer_size=128*cell_size;//this is dangerous because the file_size might be bigger!
 				typename CELL::RAW_ALLOCATOR raw;
 				auto buffer=raw.allocate(buffer_size);//what about allocating CELL's instead of char?, it would have the advantage of aligning the data
 				if(!raw.writable){
@@ -972,7 +977,10 @@ namespace pool_allocator{
  			*	do we have to grow the pool?
  			*/	 
 			if(buffer_size<(i+n-1)*cell_size){
-				if((i+n-1)>CELL::max_index) throw std::bad_alloc();
+				if((i+n-1)>CELL::max_index){
+					cerr<<"CELL::max_index:"<<CELL::max_index<<endl;	
+					throw std::bad_alloc();
+				}
 				size_t new_buffer_size=(i+n)*cell_size;
 				LOG<<this<<" increasing pool size from "<<buffer_size<<" to "<<new_buffer_size<<endl;
 				typename CELL::RAW_ALLOCATOR raw;
