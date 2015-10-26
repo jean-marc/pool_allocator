@@ -24,6 +24,9 @@
 #include <stdexcept>
 #include <iomanip>
 #include <cassert>
+#ifdef POOL_ALLOCATOR_THREAD_SAFE
+#include <mutex>
+#endif
 #include "ifthenelse.hpp"
 using namespace std;
 namespace pool_allocator{
@@ -85,7 +88,7 @@ namespace pool_allocator{
 		enum{OPTIMIZATION=false};
 		enum{FACTOR=1};
 		static const size_t MAX_SIZE=std::numeric_limits<INDEX>::max();
-		static const size_t MAX_BUFFER_SIZE=MAX_SIZE+1;//what if MAX_SIZE+1=0 that is INDEX=size_t
+		static const size_t MAX_BUFFER_SIZE=MAX_SIZE;//+1;//what if MAX_SIZE+1=0 that is INDEX=size_t
 		static const INDEX max_index=std::numeric_limits<INDEX>::max();//max_index and MAX_SIZE are the same because cell 0 is off-limit
 		static void post_allocate(cell* begin,cell* end){
 			for(cell* i=begin;i<end;++i) i->management=0x1;//will increase for reference counting	
@@ -266,7 +269,7 @@ namespace pool_allocator{
 				return &pool::get_pool<CELL>()->template get_payload<PAYLOAD_CELL>(index);
 			}
 			reference operator*()const{
-				if(!index) throw std::runtime_error("wrong reference"); 
+				if(!index) throw std::runtime_error(string("null reference for ")+typeid(VALUE_TYPE).name());	
 				typedef typename IfThenElse<CELL::OPTIMIZATION,typename CELL::HELPER,CELL>::ResultT PAYLOAD_CELL;
 				return pool::get_pool<CELL>()->template get_payload<PAYLOAD_CELL>(index);
 			}
@@ -316,6 +319,7 @@ namespace pool_allocator{
 			typedef random_access_iterator_tag iterator_category;
 			ptr(std::nullptr_t p=nullptr):index(0){}
 			ptr(INDEX index,int):index(index){}
+			ptr(const ptr<const VALUE_TYPE,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>& p):index(p.index){}
 			ptr(const ptr<VALUE_TYPE,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>& p):index(p.index){}
 			//no casting between different types	
 			template<
@@ -501,23 +505,34 @@ namespace pool_allocator{
 			//return str_hash(typeid(T).name());
 			return tmp;
 		}
+		template<typename T> struct file_name{
+			static string get(){
+				/* 
+ 				* use the hash of the typeid in case names are too long or not valid file names 
+				*/
+				ostringstream os;
+				os<<setfill('0')<<hex<<setw(16)<<get_hash<T>();
+				return os.str();
+			}
+			//let's have a rebind 
+			template<typename OTHER_T> struct rebind{
+				typedef file_name<OTHER_T> other;
+			};
+		};
 		//confusing T is not the type allocated, just a unique type used for identification
-		template<typename T> struct mmap_allocator{
+		template<
+			typename T,
+			typename FILE_NAME=file_name<T>
+		> struct mmap_allocator{
 			template<typename OTHER_PAYLOAD> struct rebind{
-				typedef mmap_allocator<OTHER_PAYLOAD> other;
+				typedef mmap_allocator<OTHER_PAYLOAD,FILE_NAME> other;
 			};
 			typedef char* pointer;
 			//typedef T value_type;
 			bool writable;
 			static mmap_allocator_impl* get_impl(){
-				/* 
- 				* use the hash of the typeid in case names are too long or not valid file names 
-				* symbolic links could be used to provide meaningful names
-				*/
-				ostringstream os;
-				os<<"db/"<<setfill('0')<<hex<<setw(16)<<get_hash<T>();
-				//static mmap_allocator_impl* a=new mmap_allocator_impl(string("db/")+typeid(T).name());
-				static mmap_allocator_impl* a=new mmap_allocator_impl(os.str());
+				//bind as late as possible otherwise compiler complaints
+				static mmap_allocator_impl* a=new mmap_allocator_impl(string("db/")+FILE_NAME::template rebind<T>::other::get());
 				return a;
 			}
 			//we know that there will be only one range used at any given time
@@ -623,6 +638,7 @@ namespace pool_allocator{
 			//cast operator
 			explicit operator bool() const{return index;}
 			#ifdef FIX_AMBIGUITY
+			//what about casting to void*???
 			explicit operator value_type*(){return index ? operator->():0;}
 			explicit operator const value_type*() const{return index ? operator->():0;}
 			#else
@@ -659,6 +675,9 @@ namespace pool_allocator{
 			//that is not correct!!!!
 			typedef std::size_t size_type;
 			typedef std::ptrdiff_t difference_type;
+			#ifdef POOL_ALLOCATOR_THREAD_SAFE
+			static std::mutex m;
+			#endif
 			allocator(){}
 			~allocator(){}
 			//what is the problem with this?
@@ -668,12 +687,19 @@ namespace pool_allocator{
 				typedef cell<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
 				return CELL::MAX_SIZE;
 			}
+			//we have to introduce thread-safety!
 			pointer allocate(size_type n){
+				#ifdef POOL_ALLOCATOR_THREAD_SAFE
+				std::lock_guard<std::mutex> lock(m);
+				#endif
 				LOG<<"allocate "<<n<<" elements"<<endl;
 				typedef cell<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
 				return pointer(pool::get_pool<CELL>()->template allocate<CELL>(max<size_t>(ceil(1.0*n/CELL::FACTOR),1))*CELL::FACTOR,0);
 			}
 			pointer allocate_at(INDEX i,size_type n){
+				#ifdef POOL_ALLOCATOR_THREAD_SAFE
+				std::lock_guard<std::mutex> lock(m);
+				#endif
 				typedef cell<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
 				return pointer(pool::get_pool<CELL>()->template allocate_at<CELL>(i,max<size_t>(ceil(1.0*n/CELL::FACTOR),1))*CELL::FACTOR,0);
 			}
@@ -695,6 +721,9 @@ namespace pool_allocator{
 			}
 			//what if derived_pointer? should cast but maybe not
 			void deallocate(pointer p,size_type n){
+				#ifdef POOL_ALLOCATOR_THREAD_SAFE
+				std::lock_guard<std::mutex> lock(m);
+				#endi
 				typedef cell<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
 				pool::get_pool<CELL>()->template deallocate<CELL>(p.index/CELL::FACTOR,max<size_t>(ceil(1.0*n/CELL::FACTOR),1));
 			}
@@ -702,7 +731,9 @@ namespace pool_allocator{
 			/*void deallocate(value_type* p,size_type n){
 
 			}*/
-			//we have to rebind the RAW_ALLOCATOR as well!!!!! except if std::allocator
+			//we have to rebind the RAW_ALLOCATOR as well!!!!! except if std::allocator, 
+			//why can't we rebind std::allocator: because we always use std::allocator<char>, mmap_allocator needs a type to 
+			//get unique file
 			template<class OTHER_PAYLOAD> struct rebind{
 				typedef typename IfThenElse<
 					std::is_same<RAW_ALLOCATOR,std::allocator<char>>::value,
@@ -773,6 +804,7 @@ namespace pool_allocator{
 			static int _index(){}
 
 		};
+
 		//specialize for void
 		template<
 			typename INDEX,
@@ -972,6 +1004,7 @@ namespace pool_allocator{
 			LOG<<"pool "<<c[0].body.info.size<<"/"<<buffer_size/sizeof(CELL)<<" cell(s) "<<endl;
 		}
 		//should only allocate 1 cell at a time, must not be mixed with allocate()!
+		//why can't it be mixed allocate? that could be useful
 		template<typename CELL> typename CELL::INDEX allocate_at(typename CELL::INDEX i,size_t n){
 			/*
  			*	do we have to grow the pool?
@@ -1022,6 +1055,7 @@ namespace pool_allocator{
 				prev=current;
 				current=c[prev].body.info.next;
 			}
+			//could we have an atomic variable that tells us if the cell is actually free?
 			if(current){ //we have found enough contiguous cells
 				if(c[current].body.info.size==n){
 					//LOG<<"found!"<<(int)prev<<"\t"<<(int)current<<"\t"<<(int)c[current].body.info.next<<endl;
@@ -1327,26 +1361,37 @@ namespace pool_allocator{
 		assert(pp==p.pool_ptr||p.index==0);
 		index=p.index;
 	}
+	#ifdef POOL_ALLOCATOR_THREAD_SAFE
+	template<
+		typename PAYLOAD,
+		typename INDEX,
+		typename ALLOCATOR,
+		typename RAW_ALLOCATOR,
+		typename MANAGEMENT
+	> 	std::mutex pool::allocator<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>::m;
+	#endif
 
 }
 template<
 	typename _PAYLOAD_,
-	typename INDEX=uint8_t
+	typename INDEX=uint8_t,
+	typename FILE_NAME=pool_allocator::pool::file_name<_PAYLOAD_>
 > using persistent_allocator_managed=pool_allocator::pool::allocator<
 	_PAYLOAD_,
 	INDEX,
 	pool_allocator::pool::POOL_ALLOCATOR,
-	pool_allocator::pool::template mmap_allocator<_PAYLOAD_>,
+	pool_allocator::pool::template mmap_allocator<_PAYLOAD_,FILE_NAME>,
 	bool
 >;
 template<
 	typename _PAYLOAD_,
-	typename INDEX=uint8_t
+	typename INDEX=uint8_t,
+	typename FILE_NAME=pool_allocator::pool::file_name<_PAYLOAD_>
 > using persistent_allocator_unmanaged=pool_allocator::pool::allocator<
 	_PAYLOAD_,
 	INDEX,
 	pool_allocator::pool::POOL_ALLOCATOR,
-	pool_allocator::pool::template mmap_allocator<_PAYLOAD_>,
+	pool_allocator::pool::template mmap_allocator<_PAYLOAD_,FILE_NAME>,
 	void
 >;
 template<
