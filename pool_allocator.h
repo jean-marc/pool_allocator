@@ -723,7 +723,7 @@ namespace pool_allocator{
 			void deallocate(pointer p,size_type n){
 				#ifdef POOL_ALLOCATOR_THREAD_SAFE
 				std::lock_guard<std::mutex> lock(m);
-				#endi
+				#endif
 				typedef cell<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
 				pool::get_pool<CELL>()->template deallocate<CELL>(p.index/CELL::FACTOR,max<size_t>(ceil(1.0*n/CELL::FACTOR),1));
 			}
