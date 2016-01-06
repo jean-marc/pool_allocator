@@ -4,11 +4,13 @@ CFLAGS = -O3 -std=c++0x -UREF_COUNT -lpthread -UOPTIM_POS -DFIX_AMBIGUITY
 	$(CC) -c $(CFLAGS) $< -o $@
 test%:test%.cpp pool_allocator.h
 	$(CC) $(CFLAGS) $< -o $@ 
+empty:
+
 #install:pool_allocator.h
 	#mkdir -p /usr/local/include/pool_allocator
 	#cp pool_allocator.h ifthenelse.hpp /usr/local/include/pool_allocator/
-arm_install:pool_allocator.h
-	cp pool_allocator.h ifthenelse.hpp /opt/ioplex_mx/usr/arm-buildroot-linux-gnueabihf/sysroot/usr/include/pool_allocator
+#arm_install:pool_allocator.h
+#	cp pool_allocator.h ifthenelse.hpp /opt/ioplex_mx/usr/arm-buildroot-linux-gnueabihf/sysroot/usr/include/pool_allocator
 prefix=/usr
 exec_prefix=$(prefix)
 includedir=$(prefix)/include
