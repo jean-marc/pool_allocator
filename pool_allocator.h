@@ -1271,18 +1271,16 @@ namespace pool_allocator{
 			INDEX index;
 			iterator(POOL_PTR pool_ptr,INDEX index=0):pool_ptr(pool_ptr),index(index),cell_index(1){
 				if(!pool_ptr->iterable) throw std::runtime_error("pool not iterable");
-				while(
-					!pool_ptr->get_cell_cast<CELL>(cell_index).management && 
-					index<pool_ptr->get_size_generic(*pool_ptr)
-				)++cell_index;
+				if(index < pool_ptr->get_size_generic(*pool_ptr)){
+					while(!pool_ptr->get_cell_cast<CELL>(cell_index).management)++cell_index;
+				}
 			}
 			iterator& operator++(){
 				++index;
 				++cell_index;//otherwise always stays on same cell
-				while(
-					!pool_ptr->get_cell_cast<CELL>(cell_index).management && 
-					index<pool_ptr->get_size_generic(*pool_ptr)
-				)++cell_index;
+				if(index < pool_ptr->get_size_generic(*pool_ptr)){
+					while(!pool_ptr->get_cell_cast<CELL>(cell_index).management)++cell_index;
+				}
 				return *this;
 			}
 			value_type* operator->(){
@@ -1297,7 +1295,7 @@ namespace pool_allocator{
 			bool operator!=(const iterator& a)const{return index!=a.index;}
 			bool operator<(const iterator& a)const{return index<a.index;}
 			INDEX get_cell_index(){
-				while(!pool_ptr->get_cell_cast<CELL>(cell_index).management) ++cell_index;
+				//while(!pool_ptr->get_cell_cast<CELL>(cell_index).management) ++cell_index;
 				return cell_index;
 			}
 			template<
