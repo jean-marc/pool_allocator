@@ -101,8 +101,8 @@ namespace pool_allocator{
 				if(i->management) throw std::out_of_range("already allocated");	
 		}
 		//check if the cell has been allocated
-		static void check(cell& c){
-			if(!c.management) throw std::out_of_range(string("bad reference for ")+typeid(PAYLOAD).name());	
+		static void check(const cell& c,INDEX index){
+			if(!c.management) throw std::out_of_range(string("bad reference ")+to_string(index)+" "+typeid(PAYLOAD).name());	
 		}
 		#ifdef REF_COUNT
 		static void increase_ref_count(cell& c){++c.management;}
@@ -140,7 +140,7 @@ namespace pool_allocator{
 		static void post_allocate(cell*,cell*){}
 		static void post_deallocate(cell*,cell*){}
 		static void is_available(cell* begin,cell* end){}
-		static void check(cell& c){}
+		static void check(const cell& c,INDEX){}
 		#ifdef REF_COUNT
 		static void increase_ref_count(cell& c){}
 		static void decrease_ref_count(cell& c){}
@@ -1229,7 +1229,7 @@ namespace pool_allocator{
 			//LOG<<this<<" dereference cell at index "<<(int)index<<endl;
 			CELL *c=(CELL*)buffer;
 			//what if buffer gets modified here because of pool increase?
-			CELL::check(c[index]);//bounds checking
+			CELL::check(c[index],index);//bounds checking
 			//return (typename CELL::PAYLOAD&)c[index].body.payload;	
 			return c[index].body.payload;	
 		}
@@ -1271,18 +1271,26 @@ namespace pool_allocator{
 			INDEX index;
 			iterator(POOL_PTR pool_ptr,INDEX index=0):pool_ptr(pool_ptr),index(index),cell_index(1){
 				if(!pool_ptr->iterable) throw std::runtime_error("pool not iterable");
+				while(
+					!pool_ptr->get_cell_cast<CELL>(cell_index).management && 
+					index<pool_ptr->get_size_generic(*pool_ptr)
+				)++cell_index;
 			}
 			iterator& operator++(){
 				++index;
 				++cell_index;//otherwise always stays on same cell
+				while(
+					!pool_ptr->get_cell_cast<CELL>(cell_index).management && 
+					index<pool_ptr->get_size_generic(*pool_ptr)
+				)++cell_index;
 				return *this;
 			}
 			value_type* operator->(){
-				while(!pool_ptr->get_cell_cast<CELL>(cell_index).management) ++cell_index;
+				//while(!pool_ptr->get_cell_cast<CELL>(cell_index).management) ++cell_index;
 				return &pool_ptr->get_payload_cast<CELL>(cell_index);
 			}
 			reference operator*(){
-				while(!pool_ptr->get_cell_cast<CELL>(cell_index).management) ++cell_index;
+				//while(!pool_ptr->get_cell_cast<CELL>(cell_index).management) ++cell_index;
 				return pool_ptr->get_payload_cast<CELL>(cell_index);
 			}
 			bool operator==(const iterator& a)const{return index==a.index;}
