@@ -389,27 +389,25 @@ namespace pool_allocator{
 			typedef PAYLOAD& reference;
 			typedef ptrdiff_t difference_type;
 			typedef forward_iterator_tag iterator_category;
-			cell_iterator(INDEX index=0):index(index),cell_index(1){}
+			cell_iterator(INDEX index=0):index(index),cell_index(1){
+				if(index<pool::get_pool<CELL>()->template get_cells<CELL>()[0].body.info.size){
+					while(!pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].management) ++cell_index;
+				}
+			}
 			cell_iterator& operator++(){
 				++index;
 				++cell_index;//otherwise always stays on same cell
+				if(index<pool::get_pool<CELL>()->template get_cells<CELL>()[0].body.info.size){
+					while(!pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].management) ++cell_index;
+				}
 				return *this;
 			}
-			value_type* operator->(){//not const
-				while(!pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].management) ++cell_index;
-				return &pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].body.payload;
-			}	
-			reference operator*(){
-				while(!pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].management) ++cell_index;
-				return pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].body.payload;
-			}
+			value_type* operator->() const{return &pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].body.payload;}	
+			reference operator*() const{return pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].body.payload;}
 			bool operator==(const cell_iterator& a)const{return index==a.index;}
 			bool operator<(const cell_iterator& a)const{return index<a.index;}
 			bool operator!=(const cell_iterator& a)const{return index!=a.index;}
-			INDEX get_cell_index(){
-				while(!pool::get_pool<CELL>()->template get_cells<CELL>()[cell_index].management) ++cell_index;
-				return cell_index;
-			}
+			INDEX get_cell_index() const{return cell_index;}
 			operator ptr<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>(){return ptr<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>(get_cell_index(),0);}
 		};
 		/*
@@ -801,8 +799,6 @@ namespace pool_allocator{
 				a.construct(p,args...);
 				return p;
 			}
-			static int _index(){}
-
 		};
 
 		//specialize for void
@@ -1271,33 +1267,24 @@ namespace pool_allocator{
 			INDEX index;
 			iterator(POOL_PTR pool_ptr,INDEX index=0):pool_ptr(pool_ptr),index(index),cell_index(1){
 				if(!pool_ptr->iterable) throw std::runtime_error("pool not iterable");
-				if(index < pool_ptr->get_size_generic(*pool_ptr)){
-					while(!pool_ptr->get_cell_cast<CELL>(cell_index).management)++cell_index;
+				if(index<pool_ptr->get_size_generic(*pool_ptr)){
+					while(!pool_ptr->get_cell_cast<CELL>(cell_index).management) ++cell_index;
 				}
 			}
 			iterator& operator++(){
 				++index;
 				++cell_index;//otherwise always stays on same cell
-				if(index < pool_ptr->get_size_generic(*pool_ptr)){
-					while(!pool_ptr->get_cell_cast<CELL>(cell_index).management)++cell_index;
+				if(index<pool_ptr->get_size_generic(*pool_ptr)){
+					while(!pool_ptr->get_cell_cast<CELL>(cell_index).management) ++cell_index;
 				}
 				return *this;
 			}
-			value_type* operator->(){
-				//while(!pool_ptr->get_cell_cast<CELL>(cell_index).management) ++cell_index;
-				return &pool_ptr->get_payload_cast<CELL>(cell_index);
-			}
-			reference operator*(){
-				//while(!pool_ptr->get_cell_cast<CELL>(cell_index).management) ++cell_index;
-				return pool_ptr->get_payload_cast<CELL>(cell_index);
-			}
+			value_type* operator->() const{return &pool_ptr->get_payload_cast<CELL>(cell_index);}
+			reference operator*() const{return pool_ptr->get_payload_cast<CELL>(cell_index);}
 			bool operator==(const iterator& a)const{return index==a.index;}
 			bool operator!=(const iterator& a)const{return index!=a.index;}
 			bool operator<(const iterator& a)const{return index<a.index;}
-			INDEX get_cell_index(){
-				//while(!pool_ptr->get_cell_cast<CELL>(cell_index).management) ++cell_index;
-				return cell_index;
-			}
+			INDEX get_cell_index() const{return cell_index;}
 			template<
 				typename PAYLOAD,
 				typename INDEX,
