@@ -178,15 +178,15 @@ namespace pool_allocator{
 			#ifdef REF_COUNT
 			ptr(const ptr& p):index(p.index){
 				if(is_same<MANAGEMENT,uint8_t>::value){	
-					LOG<<"copy constructor"<<endl;	
+					LOG_DEBUG<<"copy constructor"<<endl;	
 					//LOG<<"management:"<<(int)pool::get_pool<CELL>()->get_cell_cast<CELL>(index).management<<endl;
-					LOG<<"management:"<<CELL::get_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index))<<endl;
+					LOG_DEBUG<<"management:"<<CELL::get_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index))<<endl;
 					CELL::increase_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index)); 
 				}
 			}
 			ptr& operator=(const ptr& p){
 				if(is_same<MANAGEMENT,uint8_t>::value){	
-					LOG<<"copy operator"<<endl;	
+					LOG_DEBUG<<"copy operator"<<endl;	
 					if(index){
 						//if(pool::get_pool<CELL>()->get_cell_cast<CELL>(index).management==1){
 						if(CELL::get_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index))==1){
@@ -210,9 +210,9 @@ namespace pool_allocator{
 			
 			~ptr(){
 				if(is_same<MANAGEMENT,uint8_t>::value){	
-					LOG<<"~ptr"<<endl;
+					LOG_DEBUG<<"~ptr"<<endl;
 					//LOG<<"management:"<<(int)pool::get_pool<CELL>()->get_cell_cast<CELL>(index).management<<endl;
-					LOG<<"management:"<<CELL::get_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index))<<endl;
+					LOG_DEBUG<<"management:"<<CELL::get_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index))<<endl;
 					if(index){
 						//if(pool::get_pool<CELL>()->get_cell_cast<CELL>(index).management==1){
 						if(CELL::get_ref_count(pool::get_pool<CELL>()->get_cell_cast<CELL>(index))==1){
@@ -420,22 +420,22 @@ namespace pool_allocator{
 			size_t file_size;
 			enum{PAGE_SIZE=4096};
 			mmap_allocator_impl(string filename):writable(true){
-				LOG<<"opening file `"<<filename<<"' O_RDWR"<<endl;
+				LOG_NOTICE<<"opening file `"<<filename<<"' O_RDWR"<<endl;
 				fd = open(filename.c_str(), O_RDWR | O_CREAT/* | O_TRUNC*/, (mode_t)0600);
 				if(fd ==-1){
-					LOG<<"opening file `"<<filename<<"' O_RDONLY"<<endl;
+					LOG_NOTICE<<"opening file `"<<filename<<"' O_RDONLY"<<endl;
 					fd = open(filename.c_str(), O_RDONLY/* | O_TRUNC*/, (mode_t)0600);
 					writable=false;
 				}
 				if (fd == -1) {
-					LOG<<"\nError opening file `"<<filename<<"' for writing or reading"<<endl;
+					LOG_ERROR<<"\nError opening file `"<<filename<<"' for writing or reading"<<endl;
 					exit(EXIT_FAILURE);
 				}
 				//set the size
 				struct stat s;
 				int r=fstat(fd,&s);
 				if(r==-1){
-					LOG<<"\ncould not stat file `"<<filename<<"'"<<endl;
+					LOG_ERROR<<"\ncould not stat file `"<<filename<<"'"<<endl;
 					exit(EXIT_FAILURE);
 				}
 				file_size=0;
@@ -445,54 +445,54 @@ namespace pool_allocator{
 					int result = lseek(fd,file_size-1, SEEK_SET);
 					if (result == -1) {
 						close(fd);
-						LOG<<"Error calling lseek() to 'stretch' the file"<<endl;
+						LOG_ERROR<<"Error calling lseek() to 'stretch' the file"<<endl;
 						exit(EXIT_FAILURE);
 					}
 					result = write(fd, "", 1);
 					if (result != 1) {
 						close(fd);
-						LOG<<"Error writing last byte of the file"<<endl;
+						LOG_ERROR<<"Error writing last byte of the file"<<endl;
 						exit(EXIT_FAILURE);
 					}
 				}else{
 					file_size=s.st_size;
 				}
 				v = writable ? mmap((void*)NULL,file_size,PROT_READ|PROT_WRITE,MAP_SHARED,fd,0) : mmap((void*)NULL,file_size,PROT_READ,MAP_SHARED,fd,0);
-				LOG<<"new mapping at "<<v<<" size:"<<file_size<<endl;
+				LOG_NOTICE<<"new mapping at "<<v<<" size:"<<file_size<<endl;
 				if (v == MAP_FAILED) {
 					close(fd);
-					LOG<<"Error mmapping the file"<<endl;
+					LOG_ERROR<<"Error mmapping the file"<<endl;
 					exit(EXIT_FAILURE);
 				}
 			}
 			//it is not a proper allocator
 			char* allocate(size_t n){
-				LOG<<"mmap_allocator::allocate()"<<endl;
+				LOG_DEBUG<<"mmap_allocator::allocate()"<<endl;
 				if(n>file_size){
 					size_t _file_size=max<size_t>(ceil((double)(n)/PAGE_SIZE),1)*PAGE_SIZE;
 					int result = lseek(fd,_file_size-1, SEEK_SET);
 					if (result == -1) {
 						close(fd);
-						LOG<<"Error calling lseek() to 'stretch' the file"<<endl;
+						LOG_ERROR<<"Error calling lseek() to 'stretch' the file"<<endl;
 						exit(EXIT_FAILURE);
 					}
 					result = write(fd, "", 1);
 					if (result != 1) {
 						close(fd);
-						LOG<<"Error writing last byte of the file"<<endl;
+						LOG_ERROR<<"Error writing last byte of the file"<<endl;
 						exit(EXIT_FAILURE);
 					}
 					void* _v=(char*)mremap(v,file_size,_file_size,MAP_SHARED,MREMAP_MAYMOVE);
 					if (_v == MAP_FAILED) {
 						close(fd);
-						LOG<<"Error mremapping the file"<<endl;
+						LOG_ERROR<<"Error mremapping the file"<<endl;
 						exit(EXIT_FAILURE);
 					}
 					v=_v;
-					LOG<<"new mapping at "<<v<<" size:"<<_file_size<<endl;
+					LOG_NOTICE<<"new mapping at "<<v<<" size:"<<_file_size<<endl;
 					file_size=_file_size;
 				}
-				LOG<<"mmap_allocator::allocate "<<v<<endl;
+				LOG_DEBUG<<"mmap_allocator::allocate "<<v<<endl;
 				return (char*)v;
 			}
 		};
@@ -690,7 +690,7 @@ namespace pool_allocator{
 				#ifdef POOL_ALLOCATOR_THREAD_SAFE
 				std::lock_guard<std::mutex> lock(m);
 				#endif
-				LOG<<"allocate "<<n<<" elements"<<endl;
+				LOG_DEBUG<<"allocate "<<n<<" elements"<<endl;
 				typedef cell<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT> CELL;
 				return pointer(pool::get_pool<CELL>()->template allocate<CELL>(max<size_t>(ceil(1.0*n/CELL::FACTOR),1))*CELL::FACTOR,0);
 			}
@@ -711,9 +711,9 @@ namespace pool_allocator{
 					if(!next.index || next.index > last) next.index=1;
 					//why doesn't this compile???????
 					//if(next==nullptr) ++next;
-					LOG<<"deallocate cell "<<(int)next.index<<endl;
+					LOG_DEBUG<<"deallocate cell "<<(int)next.index<<endl;
 					deallocate(next,1);
-					LOG<<"new size:"<<size()<<endl;
+					LOG_DEBUG<<"new size:"<<size()<<endl;
 				}
 				return tmp;
 			}
@@ -745,7 +745,7 @@ namespace pool_allocator{
 				return pool::get_pool<CELL>();
 			}
 			template<typename... Args> void construct(pointer p,Args... args){
-				LOG<<"construct at "<<(int)p.index<<"("<<(void*)p.operator->()<<")"<<endl;
+				LOG_DEBUG<<"construct at "<<(int)p.index<<"("<<(void*)p.operator->()<<")"<<endl;
 				#ifdef FIX_AMBIGUITY
 				new((PAYLOAD*)p) value_type(args...);
 				#else
@@ -753,7 +753,7 @@ namespace pool_allocator{
 				#endif
 			}
 			void destroy(pointer p){
-				LOG<<"destroy at "<<(int)p.index<<endl;
+				LOG_DEBUG<<"destroy at "<<(int)p.index<<endl;
 				p->~value_type();
 			}
 			//this might cause problem, is the pointer still valid? it should be because when using vector a whole block is allocated
@@ -864,21 +864,21 @@ namespace pool_allocator{
 				size_t buffer_size=128*cell_size;
 				typename CELL::ALLOCATOR a;
 				//LOG<<"looking for pool `"<<typeid(typename CELL::PAYLOAD).name()<<"'"<<endl;
-				LOG<<"looking for pool `"<<typeid(CELL).name()<<"'\t"<<hex<<type_id<<dec<<"\t"<<a.size()<<endl;
+				LOG_DEBUG<<"looking for pool `"<<typeid(CELL).name()<<"'\t"<<hex<<type_id<<dec<<"\t"<<a.size()<<endl;
 				auto i=std::find_if(a.cbegin(),a.cend(),[=](const pool& p){return p.type_id==type_id;});
 				if(i==a.cend()){
-					LOG<<"pool not found"<<endl;
+					LOG_NOTICE<<"pool not found"<<endl;
 					typename CELL::RAW_ALLOCATOR raw;//what is the payload?
 					//LOG<<"RAW_ALLOCATOR:"<<typeid(typename CELL::RAW_ALLOCATOR::value_type).name()<<endl;
 					//we could simplify a lot by giving filename to allocator
 					auto buffer=raw.allocate(buffer_size);//should specialize so we can 
 					if(std::is_same<typename CELL::RAW_ALLOCATOR,std::allocator<char>>::value){
-						LOG<<"resetting volatile memory"<<endl;
+						LOG_NOTICE<<"resetting volatile memory"<<endl;
 						memset(buffer,0,buffer_size);
 					}
 					CELL *c=(CELL*)buffer;
 					if(c[0].body.info.size==0&&c[0].body.info.next==0){
-						LOG<<"resetting the buffer"<<endl;
+						LOG_NOTICE<<"resetting the buffer"<<endl;
 						c[0].body.info.size=0;//new pool
 						c[0].body.info.next=1;
 						c[1].body.info.size=buffer_size/sizeof(CELL)-1;
@@ -888,26 +888,26 @@ namespace pool_allocator{
  					*	warn if allocator uses local copy	
  					*	it is more serious than that: if the main pool is read-only all the other pools must be made read-only as well!
  					*/
-					if(!pool::template get_pool<POOL_CELL>()->writable) LOG<<"Warning: change only made to local copy!"<<endl;
+					if(!pool::template get_pool<POOL_CELL>()->writable) LOG_WARNING<<"Warning: change only made to local copy!"<<endl;
 					auto p=a.allocate(1);
 					if(std::is_same<typename CELL::RAW_ALLOCATOR,std::allocator<char>>::value)
-						LOG<<"create new pool at index "<<(size_t)p.index<<endl;
+						LOG_NOTICE<<"create new pool at index "<<(size_t)p.index<<endl;
 					else
-						LOG<<"create new persistent pool at index "<<(size_t)p.index<<endl;
+						LOG_NOTICE<<"create new persistent pool at index "<<(size_t)p.index<<endl;
 					f_ptr f=pool::get_size<CELL>;
 					a.construct(p,buffer,buffer_size,cell_size,stride,offsetof(CELL,body),type_id,true,CELL::MANAGED,f/*pool::get_size<CELL>*/);
 					return p;
 				}else{
-					LOG<<"pool found at index "<<(size_t)i.cell_index<<endl;
+					LOG_NOTICE<<"pool found at index "<<(size_t)i.cell_index<<endl;
 					typename CELL::RAW_ALLOCATOR raw;
 					auto buffer=raw.allocate(buffer_size);//at this stage we know if it is writable or not
 					if(std::is_same<typename CELL::RAW_ALLOCATOR,std::allocator<char>>::value){
-						LOG<<"resetting volatile memory"<<endl;
+						LOG_NOTICE<<"resetting volatile memory"<<endl;
 						memset(buffer,0,buffer_size);
 					}
 					CELL *c=(CELL*)buffer;
 					if(c[0].body.info.size==0&&c[0].body.info.next==0){//also used if file has been deleted
-						LOG<<"resetting the buffer"<<endl;
+						LOG_NOTICE<<"resetting the buffer"<<endl;
 						c[0].body.info.size=0;//new pool
 						c[0].body.info.next=1;
 						c[1].body.info.size=buffer_size/sizeof(CELL)-1;
@@ -916,9 +916,9 @@ namespace pool_allocator{
 					//we need a pointer to the pool	
 					typename CELL::ALLOCATOR::pointer p(i);
 					//sanity check: has anything changed?
-					LOG<<p->cell_size<<" vs "<<cell_size<<endl;
-					LOG<<p->payload_offset<<" vs "<<offsetof(CELL,body)<<endl;
-					LOG<<p->iterable<<" vs "<<CELL::MANAGED<<endl;
+					LOG_DEBUG<<p->cell_size<<" vs "<<cell_size<<endl;
+					LOG_DEBUG<<p->payload_offset<<" vs "<<offsetof(CELL,body)<<endl;
+					LOG_DEBUG<<p->iterable<<" vs "<<CELL::MANAGED<<endl;
 					if(p->cell_size==cell_size&&p->stride==stride&&p->payload_offset==offsetof(CELL,body)&&p->iterable==CELL::MANAGED){
 						/*
  						*	this is a problem if multiple processes use the same db: the last
@@ -927,7 +927,7 @@ namespace pool_allocator{
  						*	It would also be nice to be able to make the database read-only for testing purpose
  						*/
 						//we only have to refresh the buffer and function pointers
-						LOG<<"modifying pool struct..."<<endl;
+						LOG_NOTICE<<"modifying pool struct..."<<endl;
 						p->buffer=buffer;//this will segfault if mounted read-only, what can we do????
 						p->get_size_generic=pool::get_size<CELL>;
 						// we also have to reset buffer_size if not persisted
@@ -952,7 +952,7 @@ namespace pool_allocator{
 				typename CELL::RAW_ALLOCATOR raw;
 				auto buffer=raw.allocate(buffer_size);//what about allocating CELL's instead of char?, it would have the advantage of aligning the data
 				if(!raw.writable){
-					LOG<<"copying memory-mapped file to RAM"<<endl;
+					LOG_NOTICE<<"copying memory-mapped file to RAM"<<endl;
 					auto tmp=new char[buffer_size];
 					memcpy(tmp,buffer,buffer_size);
 					buffer=tmp;//we wont use the mapping	
@@ -978,17 +978,17 @@ namespace pool_allocator{
 		template<typename CELL> static typename CELL::ALLOCATOR::pointer create(){return helper<CELL>::go();}
 
 		pool(char* buffer,size_t buffer_size,size_t cell_size,size_t stride,size_t payload_offset,size_t type_id,bool writable,bool iterable,f_ptr get_size_generic):buffer(buffer),buffer_size(buffer_size),cell_size(cell_size),stride(stride),payload_offset(payload_offset),type_id(type_id),writable(writable),iterable(iterable),get_size_generic(get_size_generic){
-			LOG<<"new pool "<<(void*)buffer<<endl;
-			LOG<<"\tbuffer size:"<<buffer_size<<"\n";
-			LOG<<"\tcell size:"<<cell_size<<"\n";
-			LOG<<"\tstride:"<<stride<<"\n";
-			LOG<<"\tpayload offset:"<<payload_offset<<"\n";
-			LOG<<"\ttype id:"<<hex<<type_id<<dec<<"\n";
-			LOG<<"\twritable:"<<writable<<"\n";
-			LOG<<"\titerable:"<<iterable<<"\n";
+			LOG_NOTICE<<"new pool "<<(void*)buffer<<endl;
+			LOG_DEBUG<<"\tbuffer size:"<<buffer_size<<"\n";
+			LOG_DEBUG<<"\tcell size:"<<cell_size<<"\n";
+			LOG_DEBUG<<"\tstride:"<<stride<<"\n";
+			LOG_DEBUG<<"\tpayload offset:"<<payload_offset<<"\n";
+			LOG_DEBUG<<"\ttype id:"<<hex<<type_id<<dec<<"\n";
+			LOG_DEBUG<<"\twritable:"<<writable<<"\n";
+			LOG_DEBUG<<"\titerable:"<<iterable<<"\n";
 		}
 		~pool(){
-			LOG<<"~pool()"<<endl;
+			LOG_DEBUG<<"~pool()"<<endl;
 		}
 		template<typename CELL> CELL* get_cells(){
 			return (CELL*)buffer;
@@ -997,7 +997,7 @@ namespace pool_allocator{
 		size_t size() const{return buffer_size/cell_size;}
 		template<typename CELL> void status(){
 			CELL *c=(CELL*)buffer;
-			LOG<<"pool "<<c[0].body.info.size<<"/"<<buffer_size/sizeof(CELL)<<" cell(s) "<<endl;
+			LOG_DEBUG<<"pool "<<c[0].body.info.size<<"/"<<buffer_size/sizeof(CELL)<<" cell(s) "<<endl;
 		}
 		//should only allocate 1 cell at a time, must not be mixed with allocate()!
 		//why can't it be mixed allocate? that could be useful
@@ -1011,7 +1011,7 @@ namespace pool_allocator{
 					throw std::bad_alloc();
 				}
 				size_t new_buffer_size=(i+n)*cell_size;
-				LOG<<this<<" increasing pool size from "<<buffer_size<<" to "<<new_buffer_size<<endl;
+				LOG_NOTICE<<this<<" increasing pool size from "<<buffer_size<<" to "<<new_buffer_size<<endl;
 				typename CELL::RAW_ALLOCATOR raw;
 				auto new_buffer=raw.allocate(new_buffer_size);
 				//the next 3 stages must be avoided when dealing with mmap
@@ -1038,16 +1038,14 @@ namespace pool_allocator{
  			*	can we keep a journal with the changes made to the structure?
  			*
  			*/ 
-			#ifdef POOL_ALLOCATOR_VERBOSE
 			display<CELL>();
-			#endif
 			CELL *c=(CELL*)buffer;
 			typedef typename CELL::INDEX INDEX;
 			INDEX prev=0,current=c[prev].body.info.next;
 			//LOG<<"current: "<<(int)current<<endl;
 			//this should be made thread-safe
 			while(current && c[current].body.info.size<n){
-				LOG<<"\t"<<(int)current<<endl;
+				LOG_DEBUG<<"\t"<<(int)current<<endl;
 				prev=current;
 				current=c[prev].body.info.next;
 			}
@@ -1082,12 +1080,12 @@ namespace pool_allocator{
 				size_t new_size=0;
 				//does not work if prev is 0!!!
 				if(prev && prev+c[prev].body.info.size==buffer_size/cell_size){
-					LOG<<"last cell!"<<endl;
+					LOG_DEBUG<<"last cell!"<<endl;
 					new_size=n-c[prev].body.info.size;
 				}else{
 					new_size=n;
 				}
-				LOG<<"new buffer size:"<<(buffer_size/cell_size)+new_size<<" vs "<<(CELL::MAX_BUFFER_SIZE)<<endl;
+				LOG_NOTICE<<"new buffer size:"<<(buffer_size/cell_size)+new_size<<" vs "<<(CELL::MAX_BUFFER_SIZE)<<endl;
 				if(((buffer_size/cell_size)+new_size)>(CELL::MAX_BUFFER_SIZE)) throw std::bad_alloc();
 				size_t new_buffer_size=buffer_size+new_size*cell_size;
 				/*
@@ -1101,7 +1099,7 @@ namespace pool_allocator{
 				#endif
 				size_t new_buffer_size=min<size_t>(max<size_t>(buffer_size+n*cell_size,2*buffer_size),CELL::MAX_SIZE*cell_size);
 				*/
-				LOG<<this<<" increasing pool size from "<<buffer_size<<" to "<<new_buffer_size<<endl;
+				LOG_NOTICE<<this<<" increasing pool size from "<<buffer_size<<" to "<<new_buffer_size<<endl;
 				//at this stage we may decide to increase the original buffer
 				//we need to create new buffer, copy in the old one
 				typename CELL::RAW_ALLOCATOR raw;
@@ -1141,7 +1139,7 @@ namespace pool_allocator{
 				buffer_size=new_buffer_size;
 				return allocate<CELL>(n);
 			}
-			LOG<<this<<" allocate "<<n<<" cell(s) at index "<<(int)current<<" for "<<hex<<typeid(CELL).name()<<dec<<endl;
+			LOG_DEBUG<<this<<" allocate "<<n<<" cell(s) at index "<<(int)current<<" for "<<hex<<typeid(CELL).name()<<dec<<endl;
 			return current;
 		}	
 		template<typename CELL> void display() const{
@@ -1149,25 +1147,23 @@ namespace pool_allocator{
 			typedef typename CELL::INDEX INDEX;
 			INDEX prev=0,current=c[prev].body.info.next;
 			while(current){
-				LOG<<(int)current<<"\t"<<(int)c[current].body.info.size<<"\t"<<(int)c[current].body.info.next<<endl;
+				LOG_DEBUG<<(int)current<<"\t"<<(int)c[current].body.info.size<<"\t"<<(int)c[current].body.info.next<<endl;
 				prev=current;
 				current=c[prev].body.info.next;
 			}
 		}
 		template<typename CELL> void deallocate(typename CELL::INDEX index,size_t n){
-			LOG<<this<<" deallocate "<<n<<" cell(s) at index "<<(int)index<<endl;
+			LOG_DEBUG<<this<<" deallocate "<<n<<" cell(s) at index "<<(int)index<<endl;
 			CELL *c=(CELL*)buffer;
 			typedef typename CELL::INDEX INDEX;
-			#ifdef POOL_ALLOCATOR_VERBOSE
 			display<CELL>();
-			#endif
 			#ifdef OPTIM_POS
 			/*
  			*	we should insert at right position and connect adjacent regions
  			*/ 
 			INDEX prev=0,current=c[prev].body.info.next;
 			while(current && current<index){
-				LOG<<"\t"<<(int)current<<endl;
+				LOG_DEBUG<<"\t"<<(int)current<<endl;
 				prev=current;
 				current=c[prev].body.info.next;
 			}
@@ -1178,9 +1174,7 @@ namespace pool_allocator{
  			* 	.connected to current
  			* 	.connected to both (bingo!)
  			*/
-			#ifdef POOL_ALLOCATOR_VERBOSE
-			LOG<<"deallocate: prev,current {"<<(int)prev<<","<<(int)current<<"}"<<endl;
-			#endif
+			LOG_DEBUG<<"deallocate: prev,current {"<<(int)prev<<","<<(int)current<<"}"<<endl;
 			if(current){
 				if(prev && (prev+c[prev].body.info.size==index)){//connected to prev
 					if(index+n==current){//perfect fit
