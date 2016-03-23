@@ -30,6 +30,8 @@
 #include "ifthenelse.hpp"
 using namespace std;
 namespace pool_allocator{
+	extern int verbosity;
+	extern const char _context_[];
 	template<typename INDEX> struct _info{
 		INDEX size;//size of current range in multiple of sizeof(info)
 		INDEX next;//index of next available range 0 means no more range
