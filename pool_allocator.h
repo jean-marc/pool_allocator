@@ -149,6 +149,12 @@ namespace pool_allocator{
 		static int get_ref_count(cell& c){return 0;}
 		#endif
 	};
+	//trigger when pool loaded from memory
+	/*
+	template<typename PAYLOAD> struct pool_loaded{
+		static void go(){LOG_NOTICE<<"pool loaded from memory"<<endl;}
+	};
+	*/
 	struct pool{
 		//forward declaration of ptr_d for constructor
 		template<
@@ -810,6 +816,7 @@ namespace pool_allocator{
 			typename RAW_ALLOCATOR,
 			typename MANAGEMENT
 		> struct allocator<void,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>{
+			typedef RAW_ALLOCATOR _RAW_ALLOCATOR_;
 			template<typename OTHER_PAYLOAD> struct rebind{
 				typedef typename IfThenElse<
 					std::is_same<RAW_ALLOCATOR,std::allocator<char>>::value,
@@ -933,6 +940,8 @@ namespace pool_allocator{
 						p->buffer=buffer;//this will segfault if mounted read-only, what can we do????
 						p->get_size_generic=pool::get_size<CELL>;
 						// we also have to reset buffer_size if not persisted
+						//invoke trigger, the problem is that 
+						//pool_loaded<PAYLOAD>::go();//shall we pass some information?
 						if(std::is_same<typename CELL::RAW_ALLOCATOR,std::allocator<char>>::value)
 							p->buffer_size=buffer_size;
 						return p;//could we return a different pointer? dangerous: the index is used to allocate rdfs::Class
@@ -1247,6 +1256,8 @@ namespace pool_allocator{
 			* http://stackoverflow.com/questions/8102125/is-local-static-variable-initialization-thread-safe-in-c11
 			*/
 			static auto p=create<CELL>();
+			//can we add a callback here?
+			//CELL::PAYLOAD
 			return p;
 		}
 		//iterator, need to add safeguards so that CELL makes sense!
