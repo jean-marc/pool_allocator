@@ -4,6 +4,8 @@
  *	simplest allocator that works
  *
  */
+#ifndef NO_MMAP
+#endif
 #include <iostream>
 #include <sstream>
 #include <fstream>
@@ -418,6 +420,7 @@ namespace pool_allocator{
 			INDEX get_cell_index() const{return cell_index;}
 			operator ptr<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>(){return ptr<PAYLOAD,INDEX,ALLOCATOR,RAW_ALLOCATOR,MANAGEMENT>(get_cell_index(),0);}
 		};
+		#ifndef NO_MMAP
 		/*
 		*	allocate memory on file
 		*/ 
@@ -473,7 +476,7 @@ namespace pool_allocator{
 					exit(EXIT_FAILURE);
 				}
 			}
-			//it is not a proper allocator
+			//it is not a proper allocator, can we make it a proper allocator so we can easily swap?
 			char* allocate(size_t n){
 				LOG_DEBUG<<"mmap_allocator::allocate()"<<endl;
 				if(n>file_size){
@@ -504,6 +507,7 @@ namespace pool_allocator{
 				return (char*)v;
 			}
 		};
+		#endif
 		template<typename T> static size_t get_hash(){
 			std::hash<std::string> str_hash;
 			auto tmp=str_hash(typeid(T).name());
@@ -525,6 +529,7 @@ namespace pool_allocator{
 				typedef file_name<OTHER_T> other;
 			};
 		};
+		#ifndef NO_MMAP
 		//confusing T is not the type allocated, just a unique type used for identification
 		template<
 			typename T,
@@ -550,8 +555,22 @@ namespace pool_allocator{
 
 			}
 		};
+		#else
+		template<
+			typename T,
+			typename FILE_NAME=file_name<T>
+		> struct mmap_allocator:std::allocator<char>{
+			bool writable=true;
+			char* allocate(size_t n){
+				LOG_DEBUG<<"mmap_allocator::allocate("<<n<<")"<<endl;
+				return std::allocator<char>::allocate(n);
+			}
+			void deallocate(char* p,size_t n){
+				LOG_DEBUG<<"mmap_allocator::deallocate("<<p<<","<<n<<")"<<endl;
+			}
+		};
+		#endif
 		typedef ptr<pool,uint8_t,std::allocator<pool>,mmap_allocator<pool>,char> POOL_PTR;//MUST be consistent with POOL_ALLOCATOR definition
-		//typedef allocator<uint8_t,pool,std::allocator<pool>,mmap_allocator<pool>,char> POOL_ALLOCATOR;
 		template<
 			typename _PAYLOAD_,
 			typename _INDEX_,
@@ -830,7 +849,6 @@ namespace pool_allocator{
 		//let's store pools in a pool...maximum 255 pools for now
 		//typedef cell<uint8_t,pool,std::allocator<pool>,std::allocator<char>,char> POOL_CELL;
 		typedef cell<pool,uint8_t,std::allocator<pool>,mmap_allocator<pool>,char> POOL_CELL;
-		//typedef allocator<POOL_CELL> POOL_ALLOCATOR;
 		typedef allocator<pool,uint8_t,std::allocator<pool>,mmap_allocator<pool>,char> POOL_ALLOCATOR;
 		char* buffer;
 		size_t buffer_size;//in byte, this causes problem when pool's buffer is not persisted 
@@ -874,6 +892,7 @@ namespace pool_allocator{
 				typename CELL::ALLOCATOR a;
 				//LOG<<"looking for pool `"<<typeid(typename CELL::PAYLOAD).name()<<"'"<<endl;
 				LOG_DEBUG<<"looking for pool `"<<typeid(CELL).name()<<"'\t"<<hex<<type_id<<dec<<"\t"<<a.size()<<endl;
+				//what if not iterable?
 				auto i=std::find_if(a.cbegin(),a.cend(),[=](const pool& p){return p.type_id==type_id;});
 				if(i==a.cend()){
 					LOG_NOTICE<<"pool not found"<<endl;
@@ -951,15 +970,27 @@ namespace pool_allocator{
 				}
 			}
 		};
+		/*
+ 		*	specialized for pool of pools
+ 		*
+ 		*/ 
 		template<
 			typename CELL
 		> struct helper<CELL,pool>{
 			static typename CELL::ALLOCATOR::pointer go(){
+				LOG_DEBUG<<"pool of pools"<<endl;
 				std::hash<std::string> str_hash;
 				size_t type_id=str_hash(typeid(pool).name());//use the payload instead of cell type for consistency with filename
 				size_t cell_size=sizeof(CELL);
 				size_t stride=CELL::OPTIMIZATION ? sizeof(typename CELL::PAYLOAD) : cell_size;
+				#ifdef NO_MMAP
+				/*
+ 				*	I don't understand why it needs to be bigger than 256? to be investigated
+ 				*/ 
+				size_t buffer_size=16*128*cell_size;//this is dangerous because the file_size might be bigger!
+				#else
 				size_t buffer_size=128*cell_size;//this is dangerous because the file_size might be bigger!
+				#endif
 				typename CELL::RAW_ALLOCATOR raw;
 				auto buffer=raw.allocate(buffer_size);//what about allocating CELL's instead of char?, it would have the advantage of aligning the data
 				if(!raw.writable){
