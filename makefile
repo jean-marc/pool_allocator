@@ -1,5 +1,5 @@
 CC = g++ -I .  
-CFLAGS = -O3 -std=c++0x -UREF_COUNT -lpthread -UOPTIM_POS -DFIX_AMBIGUITY -DLOG_DEBUG=cerr -DLOG_NOTICE=cerr -DLOG_ERROR=cerr -DLOG_WARNING=cerr
+CFLAGS = -O3 -std=c++17 -UREF_COUNT -lpthread -UOPTIM_POS -DFIX_AMBIGUITY -DLOG_DEBUG=std::cerr -DLOG_NOTICE=std::cerr -DLOG_ERROR=std::cerr -DLOG_WARNING=std::cerr
 %.o:%.cpp %.h
 	$(CC) -c $(CFLAGS) $< -o $@
 test%:test%.cpp pool_allocator.h
